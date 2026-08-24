@@ -56,7 +56,9 @@ Confirmed-write construction and response correlation have independent
 evidence, but real write safety has not been established. The codec can build
 frames; the high-level client still blocks writes by default. Captured writes
 are individual confirmed operations with one positive or negative result per
-object. No batch-write or transactional commit/rollback mechanism is exposed.
+object. No batch-write or transactional commit/rollback mechanism was found in
+captures or static analysis, and none is validated or exposed by OpenRBus. This
+is a not-found result, not proof that no proprietary implementation can exist.
 
 ## Discovery
 

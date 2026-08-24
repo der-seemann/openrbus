@@ -28,11 +28,13 @@ client uses a confirmed-write request and validates node/address correlation in
 the response. Read-back verification is enabled by default and compares exact
 bytes. The client does not automatically retry an interrupted write.
 
-Writes are deliberately single-object and sequential. The validated protocol
-path has no group-write, commit, or rollback operation, so OpenRBus does not
-offer a transactional `write_many()` facade. Applications coordinating several
-writes must treat every confirmed result independently and allow for partial
-completion.
+Writes are deliberately single-object and sequential. No group-write, commit,
+or rollback operation was found in captures or static analysis, and none is
+validated on the supported protocol path. OpenRBus therefore does not offer a
+transactional `write_many()` facade. Applications coordinating several writes
+must treat every confirmed result independently and allow for partial
+completion. The not-found result is not proof that no proprietary
+implementation can exist.
 
 Read-back proves only that the returned bytes match the request. It does not
 prove that the setting is meaningful, persistent, reversible, or physically

@@ -1,5 +1,10 @@
 # Documentation
 
+Protocol and device-behavior claims use the evidence labels defined in
+[`protocol.md`](protocol.md): hardware-validated, statically derived, or
+hypothesis/unknown. Architecture descriptions and project policies describe
+the current OpenRBus implementation rather than asserting device behavior.
+
 - [`architecture.md`](architecture.md) — package layers and trust boundaries
 - [`protocol.md`](protocol.md) — supported wire framing and evidence status
 - [`registry.md`](registry.md) — schema, provenance, and compatibility limits
