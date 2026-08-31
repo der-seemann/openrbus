@@ -33,6 +33,21 @@ Static device definitions also contain numeric levels `0`, `4`, `5`, and `15`.
 OpenRBus preserves these values but gives them no speculative role names.
 Anything at level 2 or above is exposed as higher-risk access metadata.
 
+Levels 2 and 3 are functionally equivalent to the installer/professional
+access exposed by the physical control panel after entering the documented
+code `0012` (see the public product manual). TEA authorization therefore does
+not create a capability beyond what a person with physical appliance access
+and that code can already reach. The access boundary in either path is
+physical: access to the heating room and appliance must be restricted. A
+person without physical access also cannot obtain the installation-specific
+BLE pairing PIN and therefore cannot establish remote BLE access through
+OpenRBus.
+
+Incorrect level-2/3 settings can increase energy consumption, cause additional
+equipment wear, and reduce comfort. Treat this as an operational risk
+equivalent to changing the physical installer/professional menu, not as a
+separate security boundary introduced by OpenRBus.
+
 Access-level coverage is device-specific, not universal. The current registry
 has 1,451 device-evidence rows covering 1,189 concrete object addresses. Every
 one of those rows has one exact read and write level. Only 692 of the 2,832

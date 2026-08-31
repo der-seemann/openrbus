@@ -21,3 +21,9 @@ validation, rate limiting, and read-back checks reduce some software mistakes;
 they do not prove that a requested setting is safe for a particular device or
 installation. You are responsible for authorization, compatibility, backups,
 recovery, and all consequences of use.
+
+Access levels 2 and 3 expose the same installer/professional capabilities that
+are available at the physical control panel after entering the documented code
+`0012`. Incorrect settings at these levels can increase energy consumption,
+accelerate equipment wear, and reduce comfort. OpenRBus does not remove that
+operational risk merely because the same access is exercised programmatically.

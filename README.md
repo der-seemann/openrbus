@@ -146,6 +146,20 @@ where device-family evidence exists; unknown requirements are not invented.
 See [`docs/writing.md`](docs/writing.md) for coverage and distinct access,
 value, and write-safety errors.
 
+Level-2/3 access is functionally equivalent to the installer/professional
+access available at the physical control panel with the documented code
+`0012` (see the public product manual). OpenRBus's TEA authorization does not
+provide a capability that physical access to the appliance plus that code
+would not provide. In both cases the protection against unauthorized access is
+physical: deny access to the heating room and appliance. Without physical
+access, the installation-specific BLE pairing PIN cannot be obtained, so
+OpenRBus cannot establish remote BLE access.
+
+**Warning:** Incorrect level-2/3 settings can increase energy consumption,
+accelerate equipment wear, and reduce comfort. This is the same operational
+risk as using the physical installer/professional menu, not an additional
+security risk in the narrower access-control sense.
+
 ## Optional node authorization
 
 Level-1 reads and gated writes need no manufacturer key. Level-2/3 objects

@@ -18,6 +18,25 @@ from `InsufficientAccessLevelError`, which means the policy allowed the
 operation but the node's verified `4002:00` level was too low, and from
 `UnsafeWriteError`, which concerns write confidence.
 
+## Physical access boundary
+
+Level-2/3 authorization is functionally equivalent to the
+installer/professional access available at the physical control panel with the
+documented code `0012` (see the public product manual). The TEA mechanism does
+not expose a capability that physical access to the appliance plus that code
+would not expose.
+
+Protection against unauthorized access is physical in both cases: restrict
+access to the heating room and appliance. Physical access is also needed to
+obtain the installation-specific BLE pairing PIN; without that PIN, OpenRBus
+cannot establish remote BLE access.
+
+Level-2/3 access remains operationally high risk. Incorrect settings can
+increase energy consumption, accelerate equipment wear, and reduce comfort,
+just as incorrect changes at the physical installer/professional menu can.
+This operational risk is independent of the narrower access-control security
+boundary.
+
 ## Explicit higher-level opt-in
 
 Levels 2 (installer) and 3 (professional) can expose or change higher-risk
