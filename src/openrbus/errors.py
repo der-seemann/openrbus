@@ -43,6 +43,18 @@ class AuthenticationError(TransportError):
     """Pairing or protocol authorization failed."""
 
 
+class NodeAuthorizationError(OpenRBusError):
+    """A node-level access-elevation operation failed safely."""
+
+
+class AuthorizationKeyError(NodeAuthorizationError):
+    """External node-authorization key material is missing or invalid."""
+
+
+class AuthorizationUnsupportedError(NodeAuthorizationError):
+    """The object adapter cannot select the allocated authorization channel."""
+
+
 class RegistryError(OpenRBusError):
     """The register registry is missing or inconsistent."""
 
@@ -61,6 +73,35 @@ class WritesDisabledError(ValidationError):
 
 class UnsafeWriteError(ValidationError):
     """A critical or insufficiently verified write lacks unsafe opt-in."""
+
+
+class AccessLevelError(ValidationError):
+    """An operation cannot satisfy or resolve its declared device access level."""
+
+
+class AccessPolicyError(AccessLevelError):
+    """The caller-configured maximum access level blocks an operation."""
+
+
+class AccessLevelAmbiguityError(AccessLevelError):
+    """Several device definitions require different access levels."""
+
+
+class AccessLevelUnavailableError(AccessLevelError):
+    """The live session access level could not be read or represented safely."""
+
+
+class InsufficientAccessLevelError(AccessLevelError):
+    """The live session's verified effective level is too low."""
+
+    def __init__(self, address: object, required: int, effective: int) -> None:
+        self.address = address
+        self.required = required
+        self.effective = effective
+        super().__init__(
+            f"register {address} requires access level {required}, "
+            f"but node authorization is verified only at effective level {effective}"
+        )
 
 
 class WriteVerificationError(ValidationError):

@@ -75,3 +75,22 @@ class AsyncBulkObjectAccess(AsyncObjectAccess, Protocol):
         timeout: float | None = None,
     ) -> tuple[RawReadResult, ...]:
         """Read multiple objects while preserving order and per-item aborts."""
+
+
+@runtime_checkable
+class AsyncNodeAuthorizationAccess(AsyncObjectAccess, Protocol):
+    """Object access that can switch a node to an allocated authorization channel.
+
+    A plain CAN-IP generic-purpose adapter does not expose CANopen SDO channels
+    and therefore must not claim this capability. Direct CANopen adapters and a
+    future CAN-IP authorization-purpose adapter can implement it explicitly.
+    """
+
+    async def select_authorization_channel(
+        self,
+        node: int,
+        channel: int,
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        """Use ``channel`` for subsequent authorization object access on ``node``."""

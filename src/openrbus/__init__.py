@@ -1,7 +1,22 @@
 """Public OpenRBus package facade."""
 
-from .access import AsyncBulkObjectAccess, AsyncObjectAccess, ObjectRead, RawReadResult
-from .client import OpenRBusClient, ReadFailure, ReadOutcome, ReadResult, WritePlan
+from .access import (
+    AsyncBulkObjectAccess,
+    AsyncNodeAuthorizationAccess,
+    AsyncObjectAccess,
+    ObjectRead,
+    RawReadResult,
+)
+from .access_policy import AccessPolicy
+from .authorization import (
+    CanIpGatewayAuthorizer,
+    GatewayAuthorizationResult,
+    NodeAuthorizationResult,
+    NodeAuthorizer,
+    TeaKeyComponent,
+    compute_authentication_response,
+)
+from .client import OpenRBusClient, ReadFailure, ReadOutcome, ReadResult, SessionAccess, WritePlan
 from .discovery import (
     CapabilityReference,
     DeviceIdentity,
@@ -11,10 +26,18 @@ from .discovery import (
     identify_node,
 )
 from .errors import (
+    AccessLevelAmbiguityError,
+    AccessLevelError,
+    AccessLevelUnavailableError,
+    AccessPolicyError,
     AuthenticationError,
+    AuthorizationKeyError,
+    AuthorizationUnsupportedError,
     CanOpenAbortError,
     ChecksumError,
     ConnectionFailedError,
+    InsufficientAccessLevelError,
+    NodeAuthorizationError,
     OpenRBusError,
     ProtocolError,
     RegistryError,
@@ -29,19 +52,44 @@ from .errors import (
 )
 from .object_client import RawObjectClient
 from .protocol import ObjectAddress
-from .registry import RegisterDefinition, Registry, WireType, WriteSafety
+from .registry import (
+    AccessLevel,
+    AccessOperation,
+    AccessRequirement,
+    RegisterDefinition,
+    Registry,
+    WireType,
+    WriteSafety,
+)
 from .value_codec import CanOpenTimeOfDay, StructuredValue
 
 __all__ = [
+    "AccessLevel",
+    "AccessLevelAmbiguityError",
+    "AccessLevelError",
+    "AccessLevelUnavailableError",
+    "AccessOperation",
+    "AccessPolicy",
+    "AccessPolicyError",
+    "AccessRequirement",
     "AsyncBulkObjectAccess",
+    "AsyncNodeAuthorizationAccess",
     "AsyncObjectAccess",
     "AuthenticationError",
+    "AuthorizationKeyError",
+    "AuthorizationUnsupportedError",
+    "CanIpGatewayAuthorizer",
     "CanOpenAbortError",
     "CanOpenTimeOfDay",
     "CapabilityReference",
     "ChecksumError",
     "ConnectionFailedError",
     "DeviceIdentity",
+    "GatewayAuthorizationResult",
+    "InsufficientAccessLevelError",
+    "NodeAuthorizationError",
+    "NodeAuthorizationResult",
+    "NodeAuthorizer",
     "ObjectAddress",
     "ObjectRead",
     "OpenRBusClient",
@@ -57,7 +105,9 @@ __all__ = [
     "RegistryError",
     "RequestTimeoutError",
     "SegmentationError",
+    "SessionAccess",
     "StructuredValue",
+    "TeaKeyComponent",
     "TransportError",
     "UnknownRegisterError",
     "UnsafeWriteError",
@@ -68,6 +118,7 @@ __all__ = [
     "WriteVerificationError",
     "WritesDisabledError",
     "assigned_nodes",
+    "compute_authentication_response",
     "discover_capabilities",
     "discover_devices",
     "identify_node",

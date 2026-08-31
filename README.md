@@ -14,9 +14,8 @@ possible effects.
 
 ## Scope and boundaries
 
-- The BLE transport contains no default PIN, shared credential, manufacturer
-  unlock, or service-access algorithm. Pairing and authorization must remain
-  owner-controlled and can be injected through an application callback.
+- The package contains no default PIN, shared credential, manufacturer key, or
+  implicit secret path. Pairing and node authorization remain owner-controlled.
 - The active BLE path carries CAN-IP messages behind a transparent-service
   selector. The separate RUB codec is available for offline and future-adapter
   work, but is not part of that active path.
@@ -58,7 +57,11 @@ async def main() -> None:
     try:
         raw = RawObjectClient(transport)
         client = OpenRBusClient(raw)
-        result = await client.read(1, ObjectAddress(0x2300, 0))
+        result = await client.read(
+            1,
+            ObjectAddress(0x3654, 1),
+            device_family="Ehc-16",
+        )
         print(result.definition.name("en"), result.value)
     finally:
         await transport.disconnect()
@@ -82,7 +85,11 @@ sequential reads.
 ```python
 from openrbus import ReadFailure
 
-results = await client.read_many(1, ("2300:00", "200d:00"))
+results = await client.read_many(
+    4,
+    ("3402:01", "340c:01"),
+    device_family="Scb-10",
+)
 for result in results:
     if isinstance(result, ReadFailure):
         print(result.address, result.error)
@@ -95,11 +102,19 @@ successful values from the same batch.
 
 ## Write safety
 
-Writes have three independent gates:
+The default client permits only level-1 reads with complete access evidence.
+Level-2/3 reads and all writes are blocked unless independently enabled. See
+[`docs/access-policy.md`](docs/access-policy.md) for direct, file, and explicit
+environment-variable configuration.
 
-1. Construct `OpenRBusClient` with `enable_writes=True`.
-2. Pass `allow_unsafe=True` for definitions that are not hardware-validated.
-3. Pass a value satisfying the registry type, range, precision, family, and
+Writes have five independent gate groups:
+
+1. The client's access policy permits the register's declared level.
+2. Construct `OpenRBusClient` with `enable_writes=True`.
+3. Pass `allow_unsafe=True` for definitions that are not hardware-validated.
+4. For registers with device evidence, satisfy the declared access level. An
+   active write verifies the authoritative effective level from `4002:00`.
+5. Pass a value satisfying the registry type, range, precision, family, and
    conflict checks.
 
 Use `dry_run=True` first. A dry run validates and encodes the value without I/O,
@@ -108,7 +123,7 @@ but intentionally still requires both opt-ins.
 ```python
 from decimal import Decimal
 
-client = OpenRBusClient(raw, enable_writes=True)
+client = OpenRBusClient(raw, enable_writes=True, max_access_level=2)
 plan = await client.write(
     1,
     "2300:00",
@@ -117,12 +132,83 @@ plan = await client.write(
     dry_run=True,
 )
 print(plan.raw_value.hex())
+print(plan.required_access_level, plan.higher_risk_access)
 ```
 
 An active confirmed write is rate-limited and read back by default. Writes are
 always individual and sequential; OpenRBus provides no transactional or batch
 write. This does not make an unverified register safe; read-back only detects a
 byte-level mismatch.
+
+Access levels 1, 2, and 3 mean user, installer, and professional. Level 2 and
+above is explicitly higher-risk metadata. Access requirements are only present
+where device-family evidence exists; unknown requirements are not invented.
+See [`docs/writing.md`](docs/writing.md) for coverage and distinct access,
+value, and write-safety errors.
+
+## Optional node authorization
+
+Level-1 reads and gated writes need no manufacturer key. Level-2/3 objects
+remain blocked unless the node reports a sufficient effective level at
+`4002:00`.
+
+`NodeAuthorizer` implements the explicit, per-node challenge-response pipeline
+for adapters that implement `AsyncNodeAuthorizationAccess`. It requires a
+four-byte manufacturer-owned TEA key component which OpenRBus does not include,
+derive, cache, or log. Users must obtain any required material themselves;
+OpenRBus deliberately does not prescribe a source.
+
+Supply the component directly for one call. The independent access policy must
+also permit the requested level:
+
+```python
+await NodeAuthorizer(access, max_access_level=3).authorize(
+    4,
+    AccessLevel.PROFESSIONAL,
+    key_component=application_supplied_four_bytes,
+)
+```
+
+Or supply an explicit external file path. The file contains the uint32 key
+component as four big-endian bytes or eight conventional hexadecimal digits:
+
+```python
+await NodeAuthorizer(access, max_access_level=3).authorize(
+    4,
+    AccessLevel.PROFESSIONAL,
+    key_path="/path/outside/the/repository/node-authorization.key",
+)
+```
+
+`key_path_env="APPLICATION_SELECTED_VARIABLE"` is also supported; the named
+environment variable contains the file path, not the key. There is no default
+path or variable name. The ordinary generic-purpose `RawObjectClient` does not
+claim authorization-channel support; an adapter must explicitly implement the
+channel switch required after the free-channel request.
+
+On the active BLE/CAN-IP path, use the separately validated purpose-2 gateway
+exchange before constructing the object client. The gateway confirmation is
+not itself a node grant; `refresh_session_access()` must still prove the target
+node's effective level from `4002:00`:
+
+```python
+from openrbus import CanIpGatewayAuthorizer, OpenRBusClient, RawObjectClient
+
+await CanIpGatewayAuthorizer(transport, max_access_level=3).authorize(
+    3,
+    key_path="/explicit/path/outside/the/repository/node-authorization.key",
+)
+client = OpenRBusClient(
+    RawObjectClient(transport),
+    enable_writes=True,
+    max_access_level=3,
+)
+access = await client.refresh_session_access(4)
+assert int(access.effective_level) >= 3
+```
+
+The gateway authorizer accepts the same three explicit key-source forms and
+also has no implicit path, variable name, cache, or secret-bearing log output.
 
 ## Registry
 

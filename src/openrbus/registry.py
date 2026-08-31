@@ -12,7 +12,7 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 from importlib import resources
 from pathlib import Path
 from types import MappingProxyType
@@ -51,6 +51,56 @@ class WriteSafety(StrEnum):
 
     READ_ONLY = "read_only"
     UNVERIFIED = "unverified"
+    VALIDATED = "validated"
+
+
+class AccessLevel(IntEnum):
+    """Numeric device access level with confirmed public role names for 1..3.
+
+    Device definitions also contain levels outside the app's documented
+    user/installer/professional model.  Those values remain deliberately
+    opaque and numeric instead of receiving speculative role names.
+    """
+
+    LEVEL_0 = 0
+    USER = 1
+    INSTALLER = 2
+    PROFESSIONAL = 3
+    LEVEL_4 = 4
+    LEVEL_5 = 5
+    LEVEL_6 = 6
+    LEVEL_7 = 7
+    LEVEL_8 = 8
+    LEVEL_9 = 9
+    LEVEL_10 = 10
+    LEVEL_11 = 11
+    LEVEL_12 = 12
+    LEVEL_13 = 13
+    LEVEL_14 = 14
+    LEVEL_15 = 15
+
+    @property
+    def label(self) -> str:
+        """Return a non-speculative user-facing label."""
+
+        return {
+            AccessLevel.USER: "user",
+            AccessLevel.INSTALLER: "installer",
+            AccessLevel.PROFESSIONAL: "professional",
+        }.get(self, f"level {int(self)}")
+
+    @property
+    def is_higher_risk(self) -> bool:
+        """Whether this level is above ordinary user access."""
+
+        return self >= AccessLevel.INSTALLER
+
+
+class AccessOperation(StrEnum):
+    """Object operation for which an access level is required."""
+
+    READ = "read"
+    WRITE = "write"
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,10 +188,61 @@ class DeviceEvidence:
     loaded: bool | None
     writable_any: bool | None
     writable_all: bool | None
-    read_level_min: int | None
-    read_level_max: int | None
-    write_level_min: int | None
-    write_level_max: int | None
+    read_level_min: AccessLevel | None
+    read_level_max: AccessLevel | None
+    write_level_min: AccessLevel | None
+    write_level_max: AccessLevel | None
+
+    def __post_init__(self) -> None:
+        for label, minimum, maximum in (
+            ("read", self.read_level_min, self.read_level_max),
+            ("write", self.write_level_min, self.write_level_max),
+        ):
+            if (minimum is None) != (maximum is None):
+                raise RegistryError(f"device {label} access level requires both bounds")
+            if minimum is not None and maximum is not None and minimum > maximum:
+                raise RegistryError(f"device {label} access level minimum exceeds maximum")
+
+    @property
+    def required_read_level(self) -> AccessLevel | None:
+        """Return the exact read level, or ``None`` for missing/ranged evidence."""
+
+        return self.read_level_min if self.read_level_min == self.read_level_max else None
+
+    @property
+    def required_write_level(self) -> AccessLevel | None:
+        """Return the exact write level, or ``None`` for missing/ranged evidence."""
+
+        return self.write_level_min if self.write_level_min == self.write_level_max else None
+
+
+@dataclass(frozen=True, slots=True)
+class AccessRequirement:
+    """Device-evidence access requirement for one concrete object address."""
+
+    operation: AccessOperation
+    levels: tuple[AccessLevel, ...]
+    device_families: tuple[str, ...]
+    complete: bool
+
+    @property
+    def required_level(self) -> AccessLevel | None:
+        """Return one unambiguous level, otherwise ``None``."""
+
+        return self.levels[0] if self.complete and len(self.levels) == 1 else None
+
+    @property
+    def is_known(self) -> bool:
+        return self.complete and bool(self.levels)
+
+    @property
+    def is_ambiguous(self) -> bool:
+        return len(self.levels) > 1
+
+    @property
+    def is_higher_risk(self) -> bool:
+        level = self.required_level
+        return level is not None and level.is_higher_risk
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,15 +289,50 @@ class RegisterDefinition:
             raise RegistryError(f"invalid short code {self.code!r}")
         if not self.names.de or not self.names.en:
             raise RegistryError(f"register {self.address} lacks a DE/EN short name")
-        if self.safety.write is WriteSafety.UNVERIFIED and not self.access.writable_declared:
-            raise RegistryError("only declared-writable registers may be classified as unverified")
-        if self.safety.write is WriteSafety.READ_ONLY and self.access.writable_declared:
-            raise RegistryError("declared-writable register cannot be classified read-only")
+        if self.access.writable_declared == (self.safety.write is WriteSafety.READ_ONLY):
+            raise RegistryError("write safety classification conflicts with declared access")
 
     def name(self, locale: str = "en") -> str:
         """Return the localized short name."""
 
         return self.names.for_locale(locale)
+
+    def access_requirement(
+        self,
+        address: RegisterAddress,
+        operation: AccessOperation | str = AccessOperation.WRITE,
+        *,
+        device_family: str | None = None,
+    ) -> AccessRequirement:
+        """Resolve static access-level evidence for one concrete address.
+
+        No device evidence means an unknown, non-blocking requirement.  More
+        than one exact level is reported as ambiguous so callers can require a
+        device family instead of silently choosing the least restrictive row.
+        """
+
+        resolved_operation = AccessOperation(operation)
+        rows = tuple(row for row in self.evidence.devices if row.address == address)
+        if device_family is not None:
+            rows = tuple(row for row in rows if row.family.casefold() == device_family.casefold())
+        levels: list[AccessLevel] = []
+        complete = bool(rows)
+        for row in rows:
+            level = (
+                row.required_read_level
+                if resolved_operation is AccessOperation.READ
+                else row.required_write_level
+            )
+            if level is None:
+                complete = False
+            else:
+                levels.append(level)
+        return AccessRequirement(
+            operation=resolved_operation,
+            levels=tuple(sorted(set(levels))),
+            device_families=tuple(sorted({row.family for row in rows})),
+            complete=complete,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,6 +481,22 @@ class Registry:
             return self.get(address)
         except UnknownRegisterError:
             return None
+
+    def access_requirement(
+        self,
+        address: str | RegisterAddress | tuple[int, int],
+        operation: AccessOperation | str = AccessOperation.WRITE,
+        *,
+        device_family: str | None = None,
+    ) -> AccessRequirement:
+        """Resolve access evidence through the registry's array-aware lookup."""
+
+        parsed = _parse_address(address)
+        return self.get(parsed).access_requirement(
+            parsed,
+            operation,
+            device_family=device_family,
+        )
 
     def by_code(self, code: str) -> tuple[RegisterDefinition, ...]:
         """Return every register using a short code; a few legacy codes are duplicated."""
@@ -704,10 +856,14 @@ def _parse_device_evidence(raw_value: Any, path: str) -> DeviceEvidence:
         loaded=_optional_bool(raw.get("loaded"), f"{path}.loaded"),
         writable_any=_optional_bool(raw.get("writable_any"), f"{path}.writable_any"),
         writable_all=_optional_bool(raw.get("writable_all"), f"{path}.writable_all"),
-        read_level_min=_optional_int(raw.get("read_level_min"), f"{path}.read_level_min"),
-        read_level_max=_optional_int(raw.get("read_level_max"), f"{path}.read_level_max"),
-        write_level_min=_optional_int(raw.get("write_level_min"), f"{path}.write_level_min"),
-        write_level_max=_optional_int(raw.get("write_level_max"), f"{path}.write_level_max"),
+        read_level_min=_optional_access_level(raw.get("read_level_min"), f"{path}.read_level_min"),
+        read_level_max=_optional_access_level(raw.get("read_level_max"), f"{path}.read_level_max"),
+        write_level_min=_optional_access_level(
+            raw.get("write_level_min"), f"{path}.write_level_min"
+        ),
+        write_level_max=_optional_access_level(
+            raw.get("write_level_max"), f"{path}.write_level_max"
+        ),
     )
 
 
@@ -833,6 +989,16 @@ def _optional_int(value: Any, path: str) -> int | None:
     if value is None:
         return None
     return _expect_int(value, path)
+
+
+def _optional_access_level(value: Any, path: str) -> AccessLevel | None:
+    if value is None:
+        return None
+    raw = _expect_int(value, path)
+    try:
+        return AccessLevel(raw)
+    except ValueError as error:
+        raise RegistryError(f"{path} contains unsupported access level {raw}") from error
 
 
 def _expect_bool(value: Any, path: str) -> bool:

@@ -6,7 +6,7 @@ interpretation, and application-level safety policy.
 ```text
 application
     |
-OpenRBusClient          typed reads, validation, gated writes
+OpenRBusClient          policy-gated typed reads and writes
     |
 AsyncObjectAccess       transport-independent raw object contract
     |                    optional AsyncBulkObjectAccess capability
@@ -23,6 +23,21 @@ BleakMessageTransport   BLE segmentation and notifications
 `Registry` and `value_codec` sit beside the high-level client. They translate
 between raw bytes and engineering values but do not perform I/O.
 
+The high-level client first applies an immutable `AccessPolicy`, which defaults
+to user-level operation. For permitted level-2/3 reads and writes it maintains
+read-only `SessionAccess` samples per node, reads the authoritative effective
+level from `4002:00`, and stops before object I/O when device authorization is
+insufficient. `4003:00` is not used as evidence of a grant.
+
+`NodeAuthorizer` is a separate, explicit boundary. It accepts external key
+material for one call and requires `AsyncNodeAuthorizationAccess`, whose
+channel-selection method makes the free-channel transition explicit. A plain
+generic-purpose `RawObjectClient` cannot represent that CANopen channel change
+and therefore does not satisfy this protocol.
+
+Both node authorizers apply the same user-only default policy before reading
+challenge material or sending an authorization request.
+
 The active BLE adapter uses the transparent-service selector and CAN-IP codec.
 The RUB codec is separate and is not inserted into this stack.
 
@@ -37,6 +52,15 @@ whole operation.
 
 - The transport accepts a platform BLE identifier and an optional injected
   authorizer. OpenRBus neither derives nor persists authorization material.
+- Node authorization accepts a four-byte vendor key component only through an
+  explicit runtime value, file path, or caller-selected key-path environment
+  variable. It has no secret default and exposes no key-bearing result.
+
+`CanIpGatewayAuthorizer` implements the active BLE gateway's capture-validated
+authorization-purpose exchange. It shares only the pure TEA calculation and
+external key-source policy with `NodeAuthorizer`; CAN-IP word byte order and
+message correlation are handled separately. Gateway acceptance never replaces
+the per-node `4002:00` verification performed by `OpenRBusClient`.
 - `AsyncObjectAccess` allows future adapters without forcing BLE framing onto a
   direct-bus implementation.
 - `_write_raw` is private by convention so ordinary application code reaches it

@@ -18,6 +18,8 @@ dist/
 !.env.example
 *.pem
 *.key
+tea_key*
+*tea-key*
 *.p12
 *.pfx
 
@@ -38,4 +40,3 @@ dist/
 *.iae
 *.rxdx
 *.rxp
-

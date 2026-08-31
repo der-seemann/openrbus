@@ -9,7 +9,14 @@ import pytest
 
 from openrbus.errors import RegistryError, UnknownRegisterError
 from openrbus.protocol.canip import ObjectAddress
-from openrbus.registry import RegisterAddress, Registry, WireType, WriteSafety
+from openrbus.registry import (
+    AccessLevel,
+    AccessOperation,
+    RegisterAddress,
+    Registry,
+    WireType,
+    WriteSafety,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 CANONICAL = ROOT / "data/registry/registry-v1.json"
@@ -97,6 +104,63 @@ def test_constraints_conflicts_and_safety_are_explicit(registry: Registry) -> No
         else:
             assert item.safety.write is WriteSafety.READ_ONLY
             assert not item.safety.requires_unsafe_opt_in
+
+
+def test_device_access_levels_are_exact_but_catalog_coverage_is_partial(
+    registry: Registry,
+) -> None:
+    device_rows = [row for item in registry.registers for row in item.evidence.devices]
+    assert len(device_rows) == 1_451
+    assert len({row.address for row in device_rows}) == 1_189
+    assert all(row.required_read_level is not None for row in device_rows)
+    assert all(row.required_write_level is not None for row in device_rows)
+
+    writable = [item for item in registry.registers if item.access.writable_declared]
+    assert len(writable) == 2_832
+    assert sum(bool(item.evidence.devices) for item in writable) == 692
+
+    dhw = registry.access_requirement("3654:01", AccessOperation.WRITE, device_family="Ehc-16")
+    assert dhw.required_level is AccessLevel.USER
+    assert not dhw.is_higher_risk
+
+    night = registry.get("340b:03").access_requirement(
+        ObjectAddress(0x340B, 3), AccessOperation.WRITE, device_family="Scb-10"
+    )
+    assert night.required_level is AccessLevel.INSTALLER
+    assert night.is_higher_risk
+
+    ambiguous = registry.get("200e:00").access_requirement(
+        ObjectAddress(0x200E, 0), AccessOperation.WRITE
+    )
+    assert ambiguous.is_ambiguous
+    assert ambiguous.levels == (AccessLevel.USER, AccessLevel.INSTALLER)
+    ehc = registry.get("200e:00").access_requirement(
+        ObjectAddress(0x200E, 0), AccessOperation.WRITE, device_family="Ehc-16"
+    )
+    assert ehc.required_level is AccessLevel.INSTALLER
+
+
+def test_incomplete_access_evidence_remains_unknown_not_ambiguous() -> None:
+    raw = json.loads(PACKAGED.read_text(encoding="utf-8"))
+    register = next(item for item in raw["registers"] if item["address"] == "3654:00")
+    row = next(item for item in register["evidence"]["devices"] if item["address"] == "3654:01")
+    row["write_level_min"] = None
+    row["write_level_max"] = None
+    requirement = Registry.from_mapping(raw).access_requirement(
+        "3654:01", AccessOperation.WRITE, device_family="Ehc-16"
+    )
+    assert not requirement.is_known
+    assert not requirement.is_ambiguous
+    assert requirement.required_level is None
+
+
+def test_validated_writable_safety_does_not_require_unsafe_opt_in() -> None:
+    raw = json.loads(PACKAGED.read_text(encoding="utf-8"))
+    register = next(item for item in raw["registers"] if item["address"] == "3425:00")
+    register["safety"] = {"write": "validated", "requires_unsafe": False}
+    parsed = Registry.from_mapping(raw).get("3425:01")
+    assert parsed.safety.write is WriteSafety.VALIDATED
+    assert not parsed.safety.requires_unsafe_opt_in
 
 
 def test_packaged_copy_is_data_equivalent_and_strictly_validated() -> None:
