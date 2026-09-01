@@ -238,7 +238,8 @@ definition = registry.get("2300:00")
 print(definition.name("de"), definition.wire.type, definition.wire.unit)
 ```
 
-The source code is Apache-2.0 licensed. The normalized registry dataset is
+The language-neutral catalog and separate short DE/EN locale files are loaded
+as one typed registry. The source code is Apache-2.0 licensed. The normalized registry dataset is
 licensed under CC BY 4.0; see [`data/registry/README.md`](data/registry/README.md)
 for attribution and provenance boundaries.
 

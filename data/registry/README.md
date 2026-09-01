@@ -1,6 +1,7 @@
 # OpenRBus register registry
 
-`registry-v1.json` is the canonical, normalized public register dataset. It is
+`registry-v1.json` is the language-neutral canonical public register dataset.
+Short public labels are stored separately under `i18n/`. Registry data is
 licensed under CC BY 4.0; OpenRBus source code is licensed under Apache-2.0.
 
 The dataset contains 3,066 canonical object definitions, German and English
@@ -34,6 +35,7 @@ Publication boundary:
   customer data, or other runtime identifiers.
 
 The packaged minified copy under `src/openrbus/data/` is byte-for-data
-equivalent. `tools/export_registry.py` reads only this public JSON and emits a
+equivalent. `tools/sync_registry.py` validates and synchronizes the public main
+catalog and locale sidecars. `tools/export_registry.py` reads only this public data and emits a
 compact JSON table or an ESP32-friendly C/C++ header without SQLite. Both
 exports retain enumeration labels and packed-structure field names.

@@ -64,11 +64,14 @@ def test_compact_json_is_deterministic_and_complete(registry: Registry) -> None:
     )
     assert bitfield["fields"][0] == [
         "pumpActive",
+        "pumpActive",
         "ENUMERATION",
         0,
         1,
         "OffOn",
     ]
+    assert document["wire_types"]["TIME_OF_DAY"] == "Tageszeit"
+    assert document["formats"]["date_time"] == "Datum und Uhrzeit"
 
 
 def test_c_header_is_deterministic_and_contains_static_table(registry: Registry) -> None:

@@ -25,6 +25,7 @@ from openrbus.registry import AccessLevel, Registry
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGED_REGISTRY = ROOT / "src/openrbus/data/registry-v1.json"
+PACKAGED_I18N = ROOT / "src/openrbus/data/i18n"
 EFFECTIVE_LEVEL = ObjectAddress(0x4002, 0)
 
 
@@ -242,7 +243,11 @@ async def test_validated_user_write_needs_no_unsafe_opt_in() -> None:
     raw_registry = json.loads(PACKAGED_REGISTRY.read_text(encoding="utf-8"))
     register = next(item for item in raw_registry["registers"] if item["address"] == "3425:00")
     register["safety"] = {"write": "validated", "requires_unsafe": False}
-    registry = Registry.from_mapping(raw_registry)
+    locales = {
+        locale: json.loads((PACKAGED_I18N / f"{locale}.json").read_text(encoding="utf-8"))
+        for locale in ("de", "en")
+    }
+    registry = Registry.from_mapping(raw_registry, locales=locales)
     client = OpenRBusClient(FakeAccess(), registry=registry, enable_writes=True)
     plan = await client.write(
         4,

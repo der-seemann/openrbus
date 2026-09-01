@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from check_publication import (
     FORBIDDEN_DIRECTORIES,
     FORBIDDEN_NAMES,
+    FORBIDDEN_ORIGINAL_SUFFIX,
     FORBIDDEN_SUFFIXES,
     TEXT_PATTERNS,
 )
@@ -76,7 +77,11 @@ def audit(members: Iterable[ArchiveMember]) -> tuple[list[str], int]:
         if any(part in FORBIDDEN_DIRECTORIES for part in relative.parts[:-1]):
             failures.append(f"forbidden directory: {label}")
             continue
-        if relative.name in FORBIDDEN_NAMES or relative.suffix.lower() in FORBIDDEN_SUFFIXES:
+        if (
+            relative.name in FORBIDDEN_NAMES
+            or relative.name.casefold().endswith(FORBIDDEN_ORIGINAL_SUFFIX)
+            or relative.suffix.lower() in FORBIDDEN_SUFFIXES
+        ):
             failures.append(f"forbidden file: {label}")
             continue
         data = member.data

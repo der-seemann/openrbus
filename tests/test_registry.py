@@ -21,6 +21,15 @@ from openrbus.registry import (
 ROOT = Path(__file__).resolve().parents[1]
 CANONICAL = ROOT / "data/registry/registry-v1.json"
 PACKAGED = ROOT / "src/openrbus/data/registry-v1.json"
+PACKAGED_I18N = ROOT / "src/openrbus/data/i18n"
+
+
+def registry_from_raw(raw: dict[str, Any]) -> Registry:
+    locales = {
+        locale: json.loads((PACKAGED_I18N / f"{locale}.json").read_text(encoding="utf-8"))
+        for locale in ("de", "en")
+    }
+    return Registry.from_mapping(raw, locales=locales)
 
 
 @pytest.fixture(scope="module")
@@ -192,7 +201,7 @@ def test_incomplete_access_evidence_remains_unknown_not_ambiguous() -> None:
     row = next(item for item in register["evidence"]["devices"] if item["address"] == "3654:01")
     row["write_level_min"] = None
     row["write_level_max"] = None
-    requirement = Registry.from_mapping(raw).access_requirement(
+    requirement = registry_from_raw(raw).access_requirement(
         "3654:01", AccessOperation.WRITE, device_family="Ehc-16"
     )
     assert not requirement.is_known
@@ -204,7 +213,7 @@ def test_validated_writable_safety_does_not_require_unsafe_opt_in() -> None:
     raw = json.loads(PACKAGED.read_text(encoding="utf-8"))
     register = next(item for item in raw["registers"] if item["address"] == "3425:00")
     register["safety"] = {"write": "validated", "requires_unsafe": False}
-    parsed = Registry.from_mapping(raw).get("3425:01")
+    parsed = registry_from_raw(raw).get("3425:01")
     assert parsed.safety.write is WriteSafety.VALIDATED
     assert not parsed.safety.requires_unsafe_opt_in
 
@@ -217,11 +226,40 @@ def test_packaged_copy_is_data_equivalent_and_strictly_validated() -> None:
     malformed = dict(packaged)
     malformed["schema"] = "unknown"
     with pytest.raises(RegistryError, match="unsupported registry schema"):
-        Registry.from_mapping(malformed)
+        registry_from_raw(malformed)
+
+
+def test_main_catalog_is_language_neutral_and_sidecars_are_complete() -> None:
+    canonical = json.loads(CANONICAL.read_text(encoding="utf-8"))
+    assert all("names" not in item for item in canonical["registers"])
+    assert all("labels" not in item for item in canonical["enums"])
+    assert all(
+        bool(item.get("fallback_name_en")) == (item["code"] is None)
+        for item in canonical["registers"]
+    )
+
+    addresses = {item["address"] for item in canonical["registers"]}
+    for locale in ("de", "en"):
+        public = json.loads((PACKAGED_I18N / f"{locale}.json").read_text(encoding="utf-8"))
+        assert public["schema"] == "openrbus.registry.locale.v1"
+        assert set(public["registers"]) == addresses
+        assert public["formats"]["time"]
+        assert public["wire_types"]["TIME_OF_DAY"]
+
+
+def test_format_and_wire_type_labels_are_available(registry: Registry) -> None:
+    assert registry.wire_type_label(WireType.TIME_OF_DAY, "de") == "Tageszeit"
+    assert registry.wire_type_label(WireType.TIME_OF_DAY, "en") == "Time of day"
+    assert registry.format_label("date_time", "de") == "Datum und Uhrzeit"
+    assert registry.format_label("date_time", "en") == "Date and time"
 
 
 def test_publication_boundary_contains_no_sensitive_artifacts() -> None:
-    data = json.loads(CANONICAL.read_text(encoding="utf-8"))
+    documents = [json.loads(CANONICAL.read_text(encoding="utf-8"))]
+    documents.extend(
+        json.loads((PACKAGED_I18N / f"{locale}.json").read_text(encoding="utf-8"))
+        for locale in ("de", "en")
+    )
     forbidden_keys = {
         "capture",
         "key",
@@ -255,4 +293,5 @@ def test_publication_boundary_contains_no_sensitive_artifacts() -> None:
             for pattern in forbidden_value_patterns:
                 assert pattern.search(value) is None, value
 
-    walk(data)
+    for document in documents:
+        walk(document)

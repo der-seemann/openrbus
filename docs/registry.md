@@ -1,7 +1,9 @@
 # Public register registry
 
-`data/registry/registry-v1.json` is the canonical public dataset. The packaged
-copy under `src/openrbus/data/` is compact but data-equivalent. The current
+`data/registry/registry-v1.json` is the language-neutral canonical public
+dataset. Short public labels live in `data/registry/i18n/de.json` and
+`data/registry/i18n/en.json`. The packaged copies under `src/openrbus/data/`
+are compact but data-equivalent. The current
 revision contains 3,066 canonical register definitions and 47 legacy
 candidates that are explicitly not promoted to canonical definitions.
 
@@ -10,13 +12,10 @@ candidates that are explicitly not promoted to canonical definitions.
 Each canonical entry can include:
 
 - address and optional short code;
-- short German and English labels;
+- a short English fallback only where no stable short code exists;
 - semantic type, storage type, byte length, gain, unit, and array shape;
 - declared read/write access;
 - range, precision, enumeration, or packed-structure information;
-- short German/English enumeration value labels where supplied by the
-  dictionary (with an English base-label fallback for newer untranslated
-  values);
 - sanitized device-family evidence and explicit type/range conflicts;
 - exact per-family read/write access levels where device evidence exists;
 - a conservative write-safety classification.
@@ -32,7 +31,9 @@ readable, writable, or safe on a live installation.
 
 ## Enumerations and bit fields
 
-The current catalog contains 629 enumeration registers backed by 204 enum
+The public DE/EN sidecars cover all 3,066 register IDs, every packed field, and
+the date/time and wire-type display categories. The current catalog contains
+629 enumeration registers backed by 204 enum
 definitions and 1,159 numeric values. Short labels are published for 1,158
 values: 1,127 have German labels and all 1,158 have English labels. The sole
 unlabelled value is an unused empty unit sentinel; every enum referenced by a
@@ -40,7 +41,8 @@ register has complete value labels. For example, CP733 resolves through
 `ZoneHeatUpSpeed` and exposes the six exact German choices from `Extra langsam`
 through `Schnellste`, plus their English counterparts.
 
-Packed structures retain their exact technical field names. Thirteen pure
+The main catalog retains packed-field identifiers but not display labels.
+Public sidecars map those identifiers to their short labels. Thirteen pure
 bitfield definitions are referenced by 33 registers and describe 117
 individual bits; seven additional mixed structures used by ten registers
 contain 15 one-bit fields. The provenance has technical names for every field,
@@ -85,6 +87,25 @@ contributors. Code that parses or exports it is Apache-2.0 licensed. The
 machine-readable metadata records the schema, revision, dictionary revision,
 counts, content policy, evidence status, and license attribution.
 
-`tools/export_registry.py` reads only public JSON and produces deterministic compact
+`tools/sync_registry.py` validates the language-neutral boundary and
+synchronizes only canonical public JSON into the packaged copies. It rejects
+long enum labels and locale documents containing keys associated with original
+or explanatory text. It has no input for private/vendor locale files and
+supports `--check` for drift.
+
+Full original locale material is deliberately outside the repository under
+the ignored `local/registry/i18n-original/` tree. Local tooling generates the
+same stable register, enum, and structure-field IDs for all 28 available source
+locales, while preserving short, medium, long, and explanatory source fields.
+Those files are never an input to `sync_registry.py`. The publication and
+artifact scanners additionally reject `*_original.json` anywhere in a public
+tree or release archive.
+
+Only the reviewed DE/EN short-label files are currently public. Other source
+locales stay private until the same short-label policy can be checked without
+silently publishing longer descriptive text.
+
+`tools/export_registry.py` remains the public-only downstream exporter. It
+reads no source database or vendor input and produces deterministic compact
 JSON or a C/C++ header. Both formats now retain enum/structure references,
 enum value labels for the selected locale, and packed-field names.

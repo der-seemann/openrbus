@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openrbus"
-version = "0.2.0"
+version = "0.3.0"
 description = "Vendor-independent async protocol core for BDR-Thermea-compatible heating systems"
 readme = "README.md"
 requires-python = ">=3.11"

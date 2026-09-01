@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import IntEnum, StrEnum
@@ -398,6 +399,12 @@ class StructureField:
     gain: Decimal | None
     unit: str | None
     enum_name: str | None
+    names: LocalizedNames | None = None
+
+    def label(self, locale: str = "en") -> str:
+        """Return the localized short field label or its technical identifier."""
+
+        return self.names.for_locale(locale) if self.names is not None else self.name
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,6 +439,8 @@ class Registry:
         candidates: Iterable[RegisterCandidate] = (),
         enums: Iterable[EnumDefinition] = (),
         structures: Iterable[StructureDefinition] = (),
+        wire_type_labels: Mapping[WireType, LocalizedNames] | None = None,
+        format_labels: Mapping[str, LocalizedNames] | None = None,
     ) -> None:
         register_tuple = tuple(registers)
         by_address = {item.address: item for item in register_tuple}
@@ -471,6 +480,8 @@ class Registry:
         self.candidates = candidate_tuple
         self.enums = enum_tuple
         self.structures = structure_tuple
+        self.wire_type_labels = MappingProxyType(dict(wire_type_labels or {}))
+        self.format_labels = MappingProxyType(dict(format_labels or {}))
         self._by_address: Mapping[RegisterAddress, RegisterDefinition] = MappingProxyType(
             by_address
         )
@@ -552,13 +563,29 @@ class Registry:
 
         return self._structure_map.get(name)
 
+    def wire_type_label(self, wire_type: WireType | str, locale: str = "en") -> str:
+        """Return a localized wire-type label with the technical value as fallback."""
+
+        resolved = wire_type if isinstance(wire_type, WireType) else WireType(wire_type)
+        labels = self.wire_type_labels.get(resolved)
+        return labels.for_locale(locale) if labels is not None else resolved.value
+
+    def format_label(self, name: str, locale: str = "en") -> str | None:
+        """Return a localized date/time format-category label."""
+
+        labels = self.format_labels.get(name)
+        return labels.for_locale(locale) if labels is not None else None
+
     @classmethod
     def load(cls, path: str | Path) -> Registry:
-        """Load and validate a public registry JSON file."""
+        """Load a registry and its public locale sidecars."""
 
-        with Path(path).open("r", encoding="utf-8") as handle:
+        resolved = Path(path)
+        with resolved.open("r", encoding="utf-8") as handle:
             raw = json.load(handle)
-        return cls.from_mapping(_expect_mapping(raw, "registry"))
+        mapping = _expect_mapping(raw, "registry")
+        locales = _load_locale_paths(mapping, resolved.parent)
+        return cls.from_mapping(mapping, locales=locales)
 
     @classmethod
     def load_default(cls) -> Registry:
@@ -567,11 +594,29 @@ class Registry:
         resource = resources.files("openrbus").joinpath(DEFAULT_REGISTRY_RESOURCE)
         with resource.open("r", encoding="utf-8") as handle:
             raw = json.load(handle)
-        return cls.from_mapping(_expect_mapping(raw, "registry"))
+        mapping = _expect_mapping(raw, "registry")
+        locale_files = _locale_file_names(mapping)
+        locales: dict[str, Mapping[str, Any]] = {}
+        for locale, relative in locale_files.items():
+            with (
+                resources.files("openrbus")
+                .joinpath("data", relative)
+                .open("r", encoding="utf-8") as handle
+            ):
+                locales[locale] = _expect_mapping(json.load(handle), f"locale {locale}")
+        return cls.from_mapping(mapping, locales=locales)
 
     @classmethod
-    def from_mapping(cls, raw: Mapping[str, Any]) -> Registry:
+    def from_mapping(
+        cls,
+        raw: Mapping[str, Any],
+        *,
+        locales: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> Registry:
         """Construct and validate a registry from decoded JSON data."""
+
+        if locales is not None:
+            raw = _merge_locale_documents(raw, locales)
 
         schema = _expect_str(raw.get("schema"), "schema")
         if schema != REGISTRY_SCHEMA:
@@ -599,6 +644,8 @@ class Registry:
             candidates=(_parse_candidate(item, index) for index, item in enumerate(candidates_raw)),
             enums=(_parse_enum(item, index) for index, item in enumerate(enums_raw)),
             structures=(_parse_structure(item, index) for index, item in enumerate(structures_raw)),
+            wire_type_labels=_parse_wire_type_labels(locales),
+            format_labels=_parse_format_labels(locales),
         )
         counts = _expect_mapping(metadata_raw.get("counts"), "metadata.counts")
         expected = {
@@ -691,6 +738,7 @@ def compact_registry_mapping(registry: Registry, *, locale: str = "en") -> dict[
                 "fields": [
                     [
                         field.name,
+                        field.label(locale),
                         field.wire_type.value,
                         field.bit_offset,
                         field.bit_length,
@@ -701,6 +749,12 @@ def compact_registry_mapping(registry: Registry, *, locale: str = "en") -> dict[
             }
             for item in registry.structures
         ],
+        "wire_types": {
+            wire_type.value: registry.wire_type_label(wire_type, locale) for wire_type in WireType
+        },
+        "formats": {
+            name: labels.for_locale(locale) for name, labels in registry.format_labels.items()
+        },
         "registers": rows,
     }
 
@@ -851,7 +905,7 @@ def export_c_header(
         for field in structure.fields:
             lines.append(
                 "  {"
-                f"{_c_string(structure.name)}, {_c_string(field.name)}, "
+                f"{_c_string(structure.name)}, {_c_string(field.label(locale))}, "
                 f"{field.bit_offset}, {field.bit_length}"
                 "},"
             )
@@ -1042,6 +1096,106 @@ def _parse_enum_label(raw_value: Any, enum_path: str, offset: int) -> EnumValueL
     )
 
 
+def _parse_optional_names(value: Any, path: str) -> LocalizedNames | None:
+    if value is None:
+        return None
+    names = _expect_mapping(value, path)
+    return LocalizedNames(
+        de=_expect_str(names.get("de"), f"{path}.de"),
+        en=_expect_str(names.get("en"), f"{path}.en"),
+    )
+
+
+def _locale_file_names(raw: Mapping[str, Any]) -> Mapping[str, str]:
+    metadata = _expect_mapping(raw.get("metadata"), "metadata")
+    raw_files = metadata.get("locale_files")
+    if raw_files is None:
+        return {}
+    files = _expect_mapping(raw_files, "metadata.locale_files")
+    return {
+        locale: _expect_str(path, f"metadata.locale_files.{locale}")
+        for locale, path in files.items()
+    }
+
+
+def _load_locale_paths(raw: Mapping[str, Any], base: Path) -> dict[str, Mapping[str, Any]]:
+    result: dict[str, Mapping[str, Any]] = {}
+    for locale, relative in _locale_file_names(raw).items():
+        with (base / relative).open("r", encoding="utf-8") as handle:
+            result[locale] = _expect_mapping(json.load(handle), f"locale {locale}")
+    return result
+
+
+def _merge_locale_documents(
+    raw: Mapping[str, Any], locales: Mapping[str, Mapping[str, Any]]
+) -> Mapping[str, Any]:
+    merged = deepcopy(raw)
+    registers = {item["address"]: item for item in merged["registers"]}
+    enums = {item["name"]: item for item in merged["enums"]}
+    structures = {item["name"]: item for item in merged["structures"]}
+
+    for locale, document in locales.items():
+        for address, label in _expect_mapping(
+            document.get("registers"), f"locale {locale}.registers"
+        ).items():
+            registers[address].setdefault("names", {})[locale] = label
+        for enum_name, values in _expect_mapping(
+            document.get("enums"), f"locale {locale}.enums"
+        ).items():
+            enumeration = enums[enum_name]
+            labels = {item["value"]: item for item in enumeration.setdefault("labels", [])}
+            for raw_value, label in _expect_mapping(
+                values, f"locale {locale}.enums.{enum_name}"
+            ).items():
+                value = int(raw_value)
+                item = labels.setdefault(value, {"value": value, "names": {}})
+                item["names"][locale] = label
+            enumeration["labels"] = [labels[value] for value in sorted(labels)]
+        for structure_name, fields in _expect_mapping(
+            document.get("structure_fields"), f"locale {locale}.structure_fields"
+        ).items():
+            by_name = {field["name"]: field for field in structures[structure_name]["fields"]}
+            for field_name, label in _expect_mapping(
+                fields, f"locale {locale}.structure_fields.{structure_name}"
+            ).items():
+                by_name[field_name].setdefault("names", {})[locale] = label
+    return merged
+
+
+def _parse_wire_type_labels(
+    locales: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[WireType, LocalizedNames]:
+    if locales is None:
+        return {}
+    de = _expect_mapping(locales["de"].get("wire_types"), "locale de.wire_types")
+    en = _expect_mapping(locales["en"].get("wire_types"), "locale en.wire_types")
+    return {
+        wire_type: LocalizedNames(
+            de=_expect_str(de.get(wire_type.value), f"locale de.wire_types.{wire_type.value}"),
+            en=_expect_str(en.get(wire_type.value), f"locale en.wire_types.{wire_type.value}"),
+        )
+        for wire_type in WireType
+    }
+
+
+def _parse_format_labels(
+    locales: Mapping[str, Mapping[str, Any]] | None,
+) -> dict[str, LocalizedNames]:
+    if locales is None:
+        return {}
+    de = _expect_mapping(locales["de"].get("formats"), "locale de.formats")
+    en = _expect_mapping(locales["en"].get("formats"), "locale en.formats")
+    if set(de) != set(en):
+        raise RegistryError("public format-label sets differ by locale")
+    return {
+        name: LocalizedNames(
+            de=_expect_str(de.get(name), f"locale de.formats.{name}"),
+            en=_expect_str(en.get(name), f"locale en.formats.{name}"),
+        )
+        for name in de
+    }
+
+
 def _parse_structure(raw_value: Any, offset: int) -> StructureDefinition:
     path = f"structures[{offset}]"
     raw = _expect_mapping(raw_value, path)
@@ -1059,6 +1213,7 @@ def _parse_structure(raw_value: Any, offset: int) -> StructureDefinition:
                 gain=_decimal(field.get("gain"), f"{field_path}.gain"),
                 unit=_optional_str(field.get("unit"), f"{field_path}.unit"),
                 enum_name=_optional_str(field.get("enum"), f"{field_path}.enum"),
+                names=_parse_optional_names(field.get("names"), f"{field_path}.names"),
             )
         )
     return StructureDefinition(

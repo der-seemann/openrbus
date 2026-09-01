@@ -25,6 +25,7 @@ FORBIDDEN_SUFFIXES = {
     ".xapk",
 }
 FORBIDDEN_NAMES = {"id_rsa", "id_ed25519", ".env"}
+FORBIDDEN_ORIGINAL_SUFFIX = "_original.json"
 TEXT_PATTERNS = {
     "private key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     "GitHub token": re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b"),
@@ -56,7 +57,11 @@ def audit(root: Path) -> list[str]:
         if any(part in FORBIDDEN_DIRECTORIES for part in relative.parts[:-1]):
             failures.append(f"forbidden directory: {relative}")
             continue
-        if path.name in FORBIDDEN_NAMES or path.suffix.lower() in FORBIDDEN_SUFFIXES:
+        if (
+            path.name in FORBIDDEN_NAMES
+            or path.name.casefold().endswith(FORBIDDEN_ORIGINAL_SUFFIX)
+            or path.suffix.lower() in FORBIDDEN_SUFFIXES
+        ):
             failures.append(f"forbidden file: {relative}")
             continue
         try:
