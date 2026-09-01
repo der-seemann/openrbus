@@ -28,6 +28,8 @@ def test_compact_json_is_deterministic_and_complete(registry: Registry) -> None:
     assert document["license"] == "CC-BY-4.0"
     assert document["locale"] == "de"
     assert len(document["registers"]) == 3_066
+    assert len(document["enums"]) == 204
+    assert len(document["structures"]) == 55
 
     columns = {name: index for index, name in enumerate(document["columns"])}
     row = next(
@@ -41,6 +43,33 @@ def test_compact_json_is_deterministic_and_complete(registry: Registry) -> None:
     assert row[columns["maximum"]] == "11"
     assert row[columns["flags"]] & document["flag_bits"]["unsafe"]
 
+    cp733 = next(
+        item
+        for item in document["registers"]
+        if item[columns["index"]] == 0x346A and item[columns["subindex"]] == 0
+    )
+    assert cp733[columns["enum"]] == "ZoneHeatUpSpeed"
+    heat_up = next(item for item in document["enums"] if item["name"] == "ZoneHeatUpSpeed")
+    assert heat_up["values"] == [
+        [0, "Extra langsam"],
+        [1, "Langsamer"],
+        [2, "Langsam"],
+        [3, "Normaler Modus"],
+        [4, "Schneller"],
+        [5, "Schnellste"],
+    ]
+
+    bitfield = next(
+        item for item in document["structures"] if item["name"] == "producerManagerStatusBitfield"
+    )
+    assert bitfield["fields"][0] == [
+        "pumpActive",
+        "ENUMERATION",
+        0,
+        1,
+        "OffOn",
+    ]
+
 
 def test_c_header_is_deterministic_and_contains_static_table(registry: Registry) -> None:
     first = export_c_header(registry, locale="en")
@@ -50,6 +79,10 @@ def test_c_header_is_deterministic_and_contains_static_table(registry: Registry)
     assert "static const OpenRBusRegister OPENRBUS_REGISTERS[] PROGMEM" in first
     assert "{0x3001, 0x00" in first
     assert "OPENRBUS_REGISTER_COUNT" in first
+    assert "OPENRBUS_ENUM_VALUES[]" in first
+    assert '"ZoneHeatUpSpeed", 0, "Extra Slow"' in first
+    assert "OPENRBUS_STRUCTURE_FIELDS[]" in first
+    assert '"producerManagerStatusBitfield", "pumpActive", 0, 1' in first
     assert "sqlite" not in first.casefold()
 
 

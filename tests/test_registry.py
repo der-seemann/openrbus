@@ -65,6 +65,52 @@ def test_exact_semantic_and_storage_types(registry: Registry) -> None:
     assert time_of_day.wire.length == 6
 
 
+def test_enum_value_labels_are_complete_for_registers(registry: Registry) -> None:
+    enum_registers = [item for item in registry.registers if item.wire.enum_name]
+    assert len(enum_registers) == 629
+
+    referenced = {item.wire.enum_name for item in enum_registers}
+    for name in referenced:
+        enumeration = registry.enum(name or "")
+        assert enumeration is not None
+        assert all(enumeration.label(value, "de") for value in enumeration.values)
+        assert all(enumeration.label(value, "en") for value in enumeration.values)
+
+    heat_up = registry.enum("ZoneHeatUpSpeed")
+    assert heat_up is not None
+    assert [heat_up.label(value, "de") for value in heat_up.values] == [
+        "Extra langsam",
+        "Langsamer",
+        "Langsam",
+        "Normaler Modus",
+        "Schneller",
+        "Schnellste",
+    ]
+    assert heat_up.label(5, "en") == "Fastest"
+
+
+def test_bitfield_names_are_retained(registry: Registry) -> None:
+    bitfields = [
+        item
+        for item in registry.structures
+        if item.fields and all(field.bit_length == 1 for field in item.fields)
+    ]
+    names = {item.name for item in bitfields}
+    references = [item for item in registry.registers if item.wire.struct_name in names]
+    assert len(bitfields) == 13
+    assert len(references) == 33
+    assert sum(len(item.fields) for item in bitfields) == 117
+    assert all(field.name for item in bitfields for field in item.fields)
+
+    producer = registry.structure("producerManagerStatusBitfield")
+    assert producer is not None
+    assert [field.name for field in producer.fields[:3]] == [
+        "pumpActive",
+        "PowerEngineActive",
+        "DHWPrimaryActive",
+    ]
+
+
 def test_lookup_codes_arrays_and_candidates(registry: Registry) -> None:
     assert registry.get((0x3001, 0)).address == ObjectAddress(0x3001, 0)
     assert registry.get(ObjectAddress(0x1018, 1)).address == ObjectAddress(0x1018, 0)

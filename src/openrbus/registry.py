@@ -354,11 +354,37 @@ class RegisterCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class EnumValueLabel:
+    """Short localized label for one numeric enumeration value."""
+
+    value: int
+    de: str | None
+    en: str | None
+
+    def for_locale(self, locale: str = "en") -> str | None:
+        """Return the requested label, falling back to the other public locale."""
+
+        normalized = locale.replace("_", "-").casefold()
+        if normalized == "de" or normalized.startswith("de-"):
+            return self.de or self.en
+        return self.en or self.de
+
+
+@dataclass(frozen=True, slots=True)
 class EnumDefinition:
-    """Numeric values for an enumeration; proprietary prose is excluded."""
+    """Numeric values and short public labels for an enumeration."""
 
     name: str
     values: tuple[int, ...]
+    labels: tuple[EnumValueLabel, ...] = ()
+
+    def label(self, value: int, locale: str = "en") -> str | None:
+        """Return the short label for ``value`` when the provenance supplies one."""
+
+        return next(
+            (item.for_locale(locale) for item in self.labels if item.value == value),
+            None,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,6 +454,12 @@ class Registry:
         enum_map = {item.name: item for item in enum_tuple}
         if len(enum_map) != len(enum_tuple):
             raise RegistryError("duplicate enumeration name")
+        for enumeration in enum_tuple:
+            label_values = tuple(label.value for label in enumeration.labels)
+            if len(set(label_values)) != len(label_values):
+                raise RegistryError(f"duplicate labels in enumeration {enumeration.name}")
+            if not set(label_values).issubset(enumeration.values):
+                raise RegistryError(f"label outside enumeration {enumeration.name}")
 
         structure_tuple = tuple(structures)
         structure_map = {item.name: item for item in structure_tuple}
@@ -610,6 +642,8 @@ def compact_registry_mapping(registry: Registry, *, locale: str = "en") -> dict[
                 constraint.precision if constraint else None,
                 item.wire.max_items,
                 flags,
+                item.wire.enum_name,
+                item.wire.struct_name,
             ]
         )
     return {
@@ -632,6 +666,8 @@ def compact_registry_mapping(registry: Registry, *, locale: str = "en") -> dict[
             "precision",
             "max_items",
             "flags",
+            "enum",
+            "structure",
         ],
         "flag_bits": {
             "read": 1,
@@ -641,6 +677,30 @@ def compact_registry_mapping(registry: Registry, *, locale: str = "en") -> dict[
             "array": 16,
             "type_conflict": 32,
         },
+        "enums": [
+            {
+                "name": item.name,
+                "values": [[value, item.label(value, locale)] for value in item.values],
+            }
+            for item in registry.enums
+        ],
+        "structures": [
+            {
+                "name": item.name,
+                "length": item.length,
+                "fields": [
+                    [
+                        field.name,
+                        field.wire_type.value,
+                        field.bit_offset,
+                        field.bit_length,
+                        field.enum_name,
+                    ]
+                    for field in item.fields
+                ],
+            }
+            for item in registry.structures
+        ],
         "registers": rows,
     }
 
@@ -712,7 +772,22 @@ def export_c_header(
             "  const char *code;",
             "  const char *name;",
             "  const char *unit;",
+            "  const char *enum_name;",
+            "  const char *structure_name;",
             "} OpenRBusRegister;",
+            "",
+            "typedef struct OpenRBusEnumValue {",
+            "  const char *enum_name;",
+            "  int32_t value;",
+            "  const char *label;",
+            "} OpenRBusEnumValue;",
+            "",
+            "typedef struct OpenRBusStructureField {",
+            "  const char *structure_name;",
+            "  const char *name;",
+            "  uint16_t bit_offset;",
+            "  uint16_t bit_length;",
+            "} OpenRBusStructureField;",
             "",
             f"static const OpenRBusRegister {symbol_prefix}_REGISTERS[] PROGMEM = {{",
         ]
@@ -742,7 +817,8 @@ def export_c_header(
             f"{_c_float(constraint.maximum if constraint else None)}, "
             f"{constraint.precision if constraint and constraint.precision is not None else -1}, "
             f"{flag_expr}, {item.wire.max_items or 0}, "
-            f"{_c_string(item.code)}, {_c_string(item.name(locale))}, {_c_string(item.wire.unit)}"
+            f"{_c_string(item.code)}, {_c_string(item.name(locale))}, {_c_string(item.wire.unit)}, "
+            f"{_c_string(item.wire.enum_name)}, {_c_string(item.wire.struct_name)}"
             "},"
         )
     lines.extend(
@@ -750,6 +826,41 @@ def export_c_header(
             "};",
             f"static const size_t {symbol_prefix}_REGISTER_COUNT =",
             f"    sizeof({symbol_prefix}_REGISTERS) / sizeof({symbol_prefix}_REGISTERS[0]);",
+            "",
+            f"static const OpenRBusEnumValue {symbol_prefix}_ENUM_VALUES[] PROGMEM = {{",
+        ]
+    )
+    for enumeration in registry.enums:
+        for value in enumeration.values:
+            lines.append(
+                "  {"
+                f"{_c_string(enumeration.name)}, {value}, "
+                f"{_c_string(enumeration.label(value, locale))}"
+                "},"
+            )
+    lines.extend(
+        [
+            "};",
+            f"static const size_t {symbol_prefix}_ENUM_VALUE_COUNT =",
+            f"    sizeof({symbol_prefix}_ENUM_VALUES) / sizeof({symbol_prefix}_ENUM_VALUES[0]);",
+            "",
+            f"static const OpenRBusStructureField {symbol_prefix}_STRUCTURE_FIELDS[] PROGMEM = {{",
+        ]
+    )
+    for structure in registry.structures:
+        for field in structure.fields:
+            lines.append(
+                "  {"
+                f"{_c_string(structure.name)}, {_c_string(field.name)}, "
+                f"{field.bit_offset}, {field.bit_length}"
+                "},"
+            )
+    lines.extend(
+        [
+            "};",
+            f"static const size_t {symbol_prefix}_STRUCTURE_FIELD_COUNT =",
+            f"    sizeof({symbol_prefix}_STRUCTURE_FIELDS) / "
+            f"sizeof({symbol_prefix}_STRUCTURE_FIELDS[0]);",
             "",
             "#endif /* OPENRBUS_REGISTRY_GENERATED_H */",
             "",
@@ -906,11 +1017,28 @@ def _parse_enum(raw_value: Any, offset: int) -> EnumDefinition:
     path = f"enums[{offset}]"
     raw = _expect_mapping(raw_value, path)
     values = _expect_list(raw.get("values"), f"{path}.values")
+    labels = _expect_list(raw.get("labels", []), f"{path}.labels")
     return EnumDefinition(
         name=_expect_str(raw.get("name"), f"{path}.name"),
         values=tuple(
             _expect_int(value, f"{path}.values[{index}]") for index, value in enumerate(values)
         ),
+        labels=tuple(_parse_enum_label(value, path, index) for index, value in enumerate(labels)),
+    )
+
+
+def _parse_enum_label(raw_value: Any, enum_path: str, offset: int) -> EnumValueLabel:
+    path = f"{enum_path}.labels[{offset}]"
+    raw = _expect_mapping(raw_value, path)
+    names = _expect_mapping(raw.get("names"), f"{path}.names")
+    de = _optional_str(names.get("de"), f"{path}.names.de")
+    en = _optional_str(names.get("en"), f"{path}.names.en")
+    if de is None and en is None:
+        raise RegistryError(f"{path}.names must contain de or en")
+    return EnumValueLabel(
+        value=_expect_int(raw.get("value"), f"{path}.value"),
+        de=de,
+        en=en,
     )
 
 

@@ -6,7 +6,8 @@ licensed under CC BY 4.0; OpenRBus source code is licensed under Apache-2.0.
 The dataset contains 3,066 canonical object definitions, German and English
 short labels, semantic and storage wire types, exact storage lengths, gains,
 units, declared read/write access, available ranges and precision, conservative
-write-safety flags, and sanitized evidence summaries. It additionally retains
+write-safety flags, localized enum choices, packed-field names, and sanitized
+evidence summaries. It additionally retains
 47 configuration-only addresses as **candidates**, never as confirmed canonical
 registers.
 
@@ -34,4 +35,5 @@ Publication boundary:
 
 The packaged minified copy under `src/openrbus/data/` is byte-for-data
 equivalent. `tools/export_registry.py` reads only this public JSON and emits a
-compact JSON table or an ESP32-friendly C/C++ header without SQLite.
+compact JSON table or an ESP32-friendly C/C++ header without SQLite. Both
+exports retain enumeration labels and packed-structure field names.

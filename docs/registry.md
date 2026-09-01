@@ -14,6 +14,9 @@ Each canonical entry can include:
 - semantic type, storage type, byte length, gain, unit, and array shape;
 - declared read/write access;
 - range, precision, enumeration, or packed-structure information;
+- short German/English enumeration value labels where supplied by the
+  dictionary (with an English base-label fallback for newer untranslated
+  values);
 - sanitized device-family evidence and explicit type/range conflicts;
 - exact per-family read/write access levels where device evidence exists;
 - a conservative write-safety classification.
@@ -26,6 +29,23 @@ Evidence categories are narrow:
 
 All three are static derivations. They do not prove that a register is present,
 readable, writable, or safe on a live installation.
+
+## Enumerations and bit fields
+
+The current catalog contains 629 enumeration registers backed by 204 enum
+definitions and 1,159 numeric values. Short labels are published for 1,158
+values: 1,127 have German labels and all 1,158 have English labels. The sole
+unlabelled value is an unused empty unit sentinel; every enum referenced by a
+register has complete value labels. For example, CP733 resolves through
+`ZoneHeatUpSpeed` and exposes the six exact German choices from `Extra langsam`
+through `Schnellste`, plus their English counterparts.
+
+Packed structures retain their exact technical field names. Thirteen pure
+bitfield definitions are referenced by 33 registers and describe 117
+individual bits; seven additional mixed structures used by ten registers
+contain 15 one-bit fields. The provenance has technical names for every field,
+but no localized structure-field translations. Longer field explanations are
+therefore not copied as substitute labels.
 
 Access-level evidence is complete inside the 1,451 current device rows, but
 coverage of the global dictionary is partial: 692 of 2,832 declared-writable
@@ -55,11 +75,16 @@ not include its private working inputs, proprietary documents or formats,
 source locations, hashes, captures, credentials, device identifiers, serial
 numbers, or sampled values.
 
+Earlier revisions deliberately exported enum values as numbers only under the
+same conservative prose-exclusion rule. That omission was a content-policy
+choice, not a source or parser limitation. Enum `Description` values are short
+technical labels; only longer `Explanation` text remains excluded.
+
 The registry is licensed under CC BY 4.0 with attribution to OpenRBus
 contributors. Code that parses or exports it is Apache-2.0 licensed. The
 machine-readable metadata records the schema, revision, dictionary revision,
 counts, content policy, evidence status, and license attribution.
 
-`tools/export_registry.py` reads only public JSON and produces deterministic
-compact JSON or a C/C++ header. It deliberately has no path to private source
-databases or vendor formats.
+`tools/export_registry.py` reads only public JSON and produces deterministic compact
+JSON or a C/C++ header. Both formats now retain enum/structure references,
+enum value labels for the selected locale, and packed-field names.
