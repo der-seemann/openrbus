@@ -3,8 +3,8 @@ This patch is applied to the private ESPHome build input
 contains local ESPHome secrets).
 
 1. Add a restored `uint32_t openrbus_read_generation_counter` global,
-   initialized to zero. Persistence keeps the marker monotonic across an
-   ESP reboot.
+   initialized to zero. Persistence normally keeps the marker monotonic;
+   HA also accepts a changed marker after a reset/reconnect.
 2. Add a diagnostic template sensor with id
    `openrbus_read_generation`, update interval `never`, and zero decimal
    places.
