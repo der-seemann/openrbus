@@ -185,6 +185,8 @@ def validate_write_response(
 
 
 def _validate_node(node: int) -> None:
+    # ``0xff`` is the verified PCST bus target used by the EHC gateway's
+    # historical read-only transport. It is not an arbitrary node probe.
     if not 1 <= node <= 0xFF:
         raise ValueError("node must be 0x01..0xff")
 

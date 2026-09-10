@@ -24,6 +24,13 @@ def test_address_and_read_round_trip() -> None:
     assert unwrap_canip(wrap_canip(request.encode())) == request.encode()
 
 
+def test_verified_ehc_bus_target_ff_read_frame() -> None:
+    """Preserve the historical EHC-16 read-only Boilercode request layout."""
+
+    request = build_read(0xFF, ObjectAddress(0x2001, 0x02))
+    assert request.encode() == bytes.fromhex("020000000000ff200102")
+
+
 def test_positive_read_response_is_correlated() -> None:
     address = ObjectAddress(0x1234, 5)
     message = CanIpMessage(GenericFunction.READ_POSITIVE, b"\x03" + address.wire + b"\x10\x20")

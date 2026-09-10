@@ -13,7 +13,7 @@ from openrbus.protocol.ble_segments import BleSegmentCodec, BleSegmentReassemble
 
 TRANSPARENT_SERVICE = "f8fc98e4-5919-4a5c-852e-dfe04ad383c0"
 REQUEST_EXTENDED = "496b1b03-cebc-4d59-9c32-14ea88c266f9"
-RESPONSE_EXTENDED = "ab9af948-fb86-492d-820d-bdea2ecb7ecf"
+RESPONSE_EXTENDED = "ab9af948-fb86-492d-820d-bdea2dcb7ecf"
 ERROR_MANAGEMENT = "cff32957-5279-4075-bf3d-8e583d418c0d"
 
 BleakClientFactory = Callable[..., Any]

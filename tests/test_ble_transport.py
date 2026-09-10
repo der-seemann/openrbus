@@ -14,6 +14,10 @@ from openrbus.transport.ble import (
 )
 
 
+def test_hardware_verified_extended_response_uuid() -> None:
+    assert RESPONSE_EXTENDED == "ab9af948-fb86-492d-820d-bdea2dcb7ecf"
+
+
 class FakeBleakClient:
     def __init__(self, address: str, timeout: float):
         self.address = address
