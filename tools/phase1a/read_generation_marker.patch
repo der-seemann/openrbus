@@ -2,8 +2,9 @@ This patch is applied to the private ESPHome build input
 `heizungskeller-ble-proxy.yaml` (kept outside this repository because it
 contains local ESPHome secrets).
 
-1. Add a non-restored `uint32_t openrbus_read_generation_counter` global,
-   initialized to zero.
+1. Add a restored `uint32_t openrbus_read_generation_counter` global,
+   initialized to zero. Persistence keeps the marker monotonic across an
+   ESP reboot.
 2. Add a diagnostic template sensor with id
    `openrbus_read_generation`, update interval `never`, and zero decimal
    places.
