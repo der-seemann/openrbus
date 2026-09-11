@@ -40,3 +40,4 @@ tea_key*
 *.iae
 *.rxdx
 *.rxp
+tools/phase1a/esphome/secrets.yaml
