@@ -75,6 +75,16 @@ class Transport : public esphome::ble_client::BLEClientNode,
 
   State state() const { return this->state_; }
 
+  void loop() override {
+    if (this->request_in_flight_ && millis() - this->request_started_ms_ > REQUEST_TIMEOUT_MS) {
+      this->request_in_flight_ = false;
+      this->write_completed_ = false;
+      this->request_id_ = 0;
+      this->state_ = State::ERROR;
+      ESP_LOGW(TAG, "raw request timed out; transport returned to ERROR");
+    }
+  }
+
   void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
                            esp_ble_gattc_cb_param_t *param) override {
     (void)gattc_if;
@@ -97,6 +107,8 @@ class Transport : public esphome::ble_client::BLEClientNode,
           if (param->write.status != ESP_GATT_OK) {
             this->state_ = State::ERROR;
             this->request_in_flight_ = false;
+            this->write_completed_ = false;
+            this->request_id_ = 0;
           } else {
             this->write_completed_ = true;
           }
@@ -147,6 +159,7 @@ class Transport : public esphome::ble_client::BLEClientNode,
     }
     this->request_id_ = static_cast<uint32_t>(request_id);
     this->write_completed_ = false;
+    this->request_started_ms_ = millis();
     esp_err_t err = esp_ble_gattc_write_char(
         this->parent_->get_gattc_if(), this->parent_->get_conn_id(), this->transport_handle_, bytes.size(),
         bytes.data(), ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_MITM);
@@ -181,10 +194,12 @@ class Transport : public esphome::ble_client::BLEClientNode,
   }
 
   static constexpr const char *TAG = "openrbus_transport";
+  static constexpr uint32_t REQUEST_TIMEOUT_MS = 10000;
   esphome::ble_client::BLEClient *parent_{nullptr};
   uint16_t transport_handle_{0};
   uint32_t request_id_{0};
   uint32_t generation_{0};
+  uint32_t request_started_ms_{0};
   bool enabled_{false};
   bool authenticated_{false};
   bool request_in_flight_{false};

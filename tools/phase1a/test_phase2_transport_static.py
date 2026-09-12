@@ -30,6 +30,7 @@ class Phase2TransportStaticChecks(unittest.TestCase):
         self.assertIn("this->enabled_", HEADER)
         self.assertIn("this->request_in_flight_ = false", HEADER)
         self.assertIn("this->write_completed_ = false", HEADER)
+        self.assertIn("REQUEST_TIMEOUT_MS", HEADER)
         self.assertIn("this->transport_handle_ = 0", HEADER)
         self.assertIn("this->response_.clear()", HEADER)
 
