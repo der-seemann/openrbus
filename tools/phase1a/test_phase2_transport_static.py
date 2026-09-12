@@ -1,8 +1,7 @@
 """Offline safety checks for the ESPHome runtime transport bridge."""
 
-from pathlib import Path
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).parent / "esphome"
 YAML = (ROOT / "heizungskeller-ble-proxy.yaml").read_text()
@@ -13,7 +12,9 @@ class Phase2TransportStaticChecks(unittest.TestCase):
     def test_dynamic_session_defaults_off_and_is_not_restored(self) -> None:
         self.assertIn('id: openrbus_dynamic_session', YAML)
         self.assertIn('initial_value: "false"', YAML)
-        self.assertNotIn('id: openrbus_dynamic_session\n    type: bool\n    restore_value: true', YAML)
+        self.assertNotIn(
+            'id: openrbus_dynamic_session\n    type: bool\n    restore_value: true', YAML
+        )
         self.assertIn("set_enabled(true)", YAML)
         self.assertIn("set_enabled(false)", YAML)
 
@@ -22,6 +23,9 @@ class Phase2TransportStaticChecks(unittest.TestCase):
         self.assertNotIn("register_for_notify", HEADER)
         self.assertIn("esp_ble_gattc_write_char", HEADER)
         self.assertIn("register_ble_node(this)", HEADER)
+        self.assertIn("response_handle_", HEADER)
+        self.assertIn("param->notify.handle == this->response_handle_", HEADER)
+        self.assertIn("response_uuid[]", HEADER)
 
     def test_input_and_disconnect_guards_exist(self) -> None:
         self.assertIn("request_id < 0", HEADER)
@@ -34,6 +38,11 @@ class Phase2TransportStaticChecks(unittest.TestCase):
         self.assertIn("REQUEST_TIMEOUT_MS", HEADER)
         self.assertIn("this->transport_handle_ = 0", HEADER)
         self.assertIn("this->response_.clear()", HEADER)
+
+    def test_handle_refresh_is_discovery_guarded(self) -> None:
+        self.assertIn("this->refresh_transport_handle_();", HEADER)
+        self.assertIn("ClientState::ESTABLISHED", HEADER)
+        self.assertIn("this->response_handle_ = 0", HEADER)
 
 
 if __name__ == "__main__":

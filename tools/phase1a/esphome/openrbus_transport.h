@@ -76,6 +76,9 @@ class Transport : public esphome::ble_client::BLEClientNode,
   State state() const { return this->state_; }
 
   void loop() override {
+    if (this->parent_ != nullptr && this->node_state == esphome::esp32_ble_tracker::ClientState::ESTABLISHED &&
+        (this->transport_handle_ == 0 || this->response_handle_ == 0))
+      this->refresh_transport_handle_();
     if (this->request_in_flight_ && millis() - this->request_started_ms_ > REQUEST_TIMEOUT_MS) {
       this->request_in_flight_ = false;
       this->write_completed_ = false;
@@ -90,16 +93,7 @@ class Transport : public esphome::ble_client::BLEClientNode,
     (void)gattc_if;
     switch (event) {
       case ESP_GATTC_SEARCH_CMPL_EVT: {
-        static const uint8_t service_uuid[] = {0xF8, 0xFC, 0x98, 0xE4, 0x59, 0x19, 0x4A, 0x5C,
-                                               0x85, 0x2E, 0xDF, 0xE0, 0x4A, 0xD3, 0x83, 0xC0};
-        static const uint8_t write_uuid[] = {0x49, 0x6B, 0x1B, 0x03, 0xCE, 0xBC, 0x4D, 0x59,
-                                             0x9C, 0x32, 0x14, 0xEA, 0x88, 0xC2, 0x66, 0xF9};
-        auto *chr = this->parent_->get_characteristic(
-            esphome::esp32_ble_tracker::ESPBTUUID::from_raw(service_uuid),
-            esphome::esp32_ble_tracker::ESPBTUUID::from_raw(write_uuid));
-        this->transport_handle_ = chr == nullptr ? 0 : chr->handle;
-        this->node_state = esphome::esp32_ble_tracker::ClientState::ESTABLISHED;
-        this->state_ = this->enabled_ && this->authenticated_ && this->transport_handle_ != 0 ? State::READY : State::AUTHENTICATING;
+        this->refresh_transport_handle_();
         break;
       }
       case ESP_GATTC_WRITE_CHAR_EVT:
@@ -115,8 +109,10 @@ class Transport : public esphome::ble_client::BLEClientNode,
         }
         break;
       case ESP_GATTC_NOTIFY_EVT:
-        if (this->request_in_flight_ && this->write_completed_ &&
-            param->notify.handle == this->transport_handle_ &&
+        // The gateway can publish the response notification before the
+        // asynchronous WRITE_CHAR_EVT callback.  Correlate on the active
+        // request and response characteristic, not on callback ordering.
+        if (this->request_in_flight_ && param->notify.handle == this->response_handle_ &&
             param->notify.value_len != 0) {
           if (param->notify.value_len > MAX_RESPONSE_BYTES) {
             this->request_in_flight_ = false;
@@ -137,6 +133,7 @@ class Transport : public esphome::ble_client::BLEClientNode,
       case ESP_GATTC_DISCONNECT_EVT:
       case ESP_GATTC_CLOSE_EVT:
         this->transport_handle_ = 0;
+        this->response_handle_ = 0;
         this->request_in_flight_ = false;
         this->write_completed_ = false;
         this->response_.clear();
@@ -152,6 +149,29 @@ class Transport : public esphome::ble_client::BLEClientNode,
   }
 
  protected:
+  void refresh_transport_handle_() {
+    if (this->parent_ == nullptr)
+      return;
+    static const uint8_t service_uuid[] = {0xC0, 0x83, 0xD3, 0x4A, 0xE0, 0xDF, 0x2E, 0x85,
+                                           0x5C, 0x4A, 0x19, 0x59, 0xE4, 0x98, 0xFC, 0xF8};
+    static const uint8_t write_uuid[] = {0xF9, 0x66, 0xC2, 0x88, 0xEA, 0x14, 0x32, 0x9C,
+                                         0x59, 0x4D, 0xBC, 0xCE, 0x03, 0x1B, 0x6B, 0x49};
+    static const uint8_t response_uuid[] = {0xCF, 0x7E, 0xCB, 0x2D, 0xEA, 0xBD, 0x0D, 0x82,
+                                            0x2D, 0x49, 0x86, 0xFB, 0x48, 0xF9, 0x9A, 0xAB};
+    auto *chr = this->parent_->get_characteristic(
+        esphome::esp32_ble_tracker::ESPBTUUID::from_raw(service_uuid),
+        esphome::esp32_ble_tracker::ESPBTUUID::from_raw(write_uuid));
+    auto *response_chr = this->parent_->get_characteristic(
+        esphome::esp32_ble_tracker::ESPBTUUID::from_raw(service_uuid),
+        esphome::esp32_ble_tracker::ESPBTUUID::from_raw(response_uuid));
+    this->transport_handle_ = chr == nullptr ? 0 : chr->handle;
+    this->response_handle_ = response_chr == nullptr ? 0 : response_chr->handle;
+    if (this->transport_handle_ != 0 && this->response_handle_ != 0) {
+      this->node_state = esphome::esp32_ble_tracker::ClientState::ESTABLISHED;
+      this->state_ = this->enabled_ && this->authenticated_ ? State::READY : State::AUTHENTICATING;
+    }
+  }
+
   void api_request(int32_t request_id, std::string frame) {
     std::vector<uint8_t> bytes;
     if (request_id < 0 || frame.size() > 128 || !parse_hex(frame, bytes) || bytes.empty() || bytes.size() > 64) {
@@ -159,7 +179,7 @@ class Transport : public esphome::ble_client::BLEClientNode,
       ESP_LOGW(TAG, "raw request rejected: malformed frame");
       return;
     }
-    if (!this->enabled_ || !this->authenticated_ || this->transport_handle_ == 0 || this->request_in_flight_ ||
+    if (!this->enabled_ || !this->authenticated_ || this->transport_handle_ == 0 || this->response_handle_ == 0 || this->request_in_flight_ ||
         this->response_ready_) {
       this->state_ = State::ERROR;
       ESP_LOGW(TAG, "raw request rejected: transport not ready or busy");
@@ -206,6 +226,7 @@ class Transport : public esphome::ble_client::BLEClientNode,
   static constexpr uint16_t MAX_RESPONSE_BYTES = 512;
   esphome::ble_client::BLEClient *parent_{nullptr};
   uint16_t transport_handle_{0};
+  uint16_t response_handle_{0};
   uint32_t request_id_{0};
   uint32_t generation_{0};
   uint32_t request_started_ms_{0};
@@ -224,4 +245,3 @@ inline Transport &instance() {
 }
 
 }  // namespace openrbus_phase2
-

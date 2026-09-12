@@ -1,9 +1,9 @@
 # Phase-2 ESPHome transport wiring
 
 The productive YAML remains `/config/esphome/heizungskeller-ble-proxy.yaml`.
-The following additive wiring is the reviewed offline experiment; it must be
-applied only after a separate review and must not be sent to the remote proxy
-without explicit approval.
+The following additive wiring is the reviewed Phase-2 runtime bridge.  The
+known-good default path remains unchanged; enabling the dynamic session is an
+explicit operator action.
 
 1. Add `openrbus_transport.h` beside `openrbus_zero_write.h` and include it in
    `esphome.includes`.
@@ -20,9 +20,12 @@ without explicit approval.
    connect/auth/read/disconnect behavior. Disable it with
    `openrbus_disable_dynamic_transport`.
 
-The bridge resolves the transport write characteristic by UUID after the
-existing service discovery, writes one non-empty frame with response, and
-observes the response notification already owned by the BLE text-sensor node.
+The bridge resolves both the transport-write and response-notification
+characteristics by UUID after the existing service discovery, writes one
+non-empty frame with response, and observes the response notification already
+owned by the BLE text-sensor node.  Notification completion is correlated by
+the active request and response handle; it does not assume that the
+asynchronous write-completion callback arrives first.
 It does not register another CCCD, perform pairing, or use `ble_write` for
 runtime frames. Response bytes are exposed through the existing raw-response
 sensor plus the monotonic generation marker and last-request-id diagnostic
