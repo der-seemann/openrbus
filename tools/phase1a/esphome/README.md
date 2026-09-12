@@ -43,6 +43,22 @@ The expected live response decodes to `7702`. Use the direct verifier in
 `tools/phase1a/verify_live_read.py` only against an explicitly selected proxy;
 never run it concurrently with a production HA coordinator.
 
+## Phase-2 transport bridge (offline)
+
+`openrbus_transport.h` is an ESPHome-native, offline-built bridge for dynamic
+raw reads. It registers one `BLEClientNode` on the existing EHC client,
+resolves the transport write characteristic after service discovery, and uses
+the public GATTC write API for one in-flight request at a time. It observes the
+already-owned response notification without registering a second CCCD. The
+known-good security, CCCD, empty-write, IdentInfo, and reconnect path remains
+owned by the existing YAML/client implementation; the bridge never starts a
+second BLE connection or calls the `ble_write` action for runtime frames.
+
+The experimental YAML wiring is kept in the Home Assistant ESPHome source of
+truth and has been clean-built offline with ESPHome 2026.8.2. No OTA or live
+deployment has been performed. The standalone ESP-IDF project remains paused
+until a physical recovery path exists.
+
 ## Deployment and source boundaries
 
 OTA/deployment still uses the Home Assistant ESPHome installation and its
