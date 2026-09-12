@@ -8,6 +8,7 @@ esphome:
   comment: "ESP-WROOM-32 Bluetooth-Proxy mit OpenRBus Pairing-PoC"
   includes:
     - openrbus_zero_write.h
+    - openrbus_transport.h
 
 esp32:
   board: esp32dev
@@ -20,6 +21,7 @@ logger:
   level: DEBUG
 
 api:
+  custom_services: true
   encryption:
     key: !secret api_encryption_key
   actions:
@@ -151,7 +153,7 @@ api:
                           id(openrbus_gateway_auth_ok) ? "gateway_authenticated" : "gateway_auth_failed");
                     - if:
                         condition:
-                          lambda: return id(openrbus_gateway_auth_ok);
+                          lambda: return id(openrbus_gateway_auth_ok) && !id(openrbus_dynamic_session);
                         then:
                           - lambda: |-
                               // Historic, read-only EHC reference: CAN-IP Read through
@@ -174,10 +176,27 @@ api:
                           - lambda: |-
                               id(openrbus_pairing_status).publish_state(
                                 id(openrbus_read_ready) ? "openrbus_read_received" : "openrbus_read_timeout");
+                        else:
+                          - lambda: id(openrbus_pairing_status).publish_state("gateway_authenticated_dynamic");
             else:
               - lambda: id(openrbus_pairing_status).publish_state("gateway_connect_failed");
-        - ble_client.disconnect:
-            id: ehc16_ble_client
+        - if:
+            condition:
+              lambda: return !id(openrbus_dynamic_session);
+            then:
+              - ble_client.disconnect:
+                  id: ehc16_ble_client
+    - action: openrbus_enable_dynamic_transport
+      then:
+        - lambda: |-
+            id(openrbus_dynamic_session) = true;
+            id(openrbus_pairing_status).publish_state("dynamic_session_enabled");
+    - action: openrbus_disable_dynamic_transport
+      then:
+        - lambda: |-
+            id(openrbus_dynamic_session) = false;
+            id(openrbus_pairing_status).publish_state("dynamic_session_disabled");
+            id(ehc16_ble_client).disconnect();
     - action: openrbus_reboot
       then:
         - lambda: |-
@@ -250,6 +269,10 @@ globals:
     type: bool
     restore_value: false
     initial_value: "false"
+  - id: openrbus_dynamic_session
+    type: bool
+    restore_value: false
+    initial_value: "false"
   - id: openrbus_read_response
     type: std::vector<uint8_t>
     restore_value: false
@@ -279,6 +302,32 @@ interval:
   - interval: 250ms
     then:
       - lambda: |-
+          // Attach once to the existing BLEClient. This does not start a
+          // second connection or duplicate the verified auth/CCCD lifecycle.
+          openrbus_phase2::instance().begin(id(ehc16_ble_client));
+          std::vector<uint8_t> dynamic_response;
+          uint32_t dynamic_request_id = 0;
+          uint32_t dynamic_generation = 0;
+          if (openrbus_phase2::instance().take_response(dynamic_response, dynamic_request_id, dynamic_generation)) {
+            static const char hex[] = "0123456789abcdef";
+            std::string encoded;
+            encoded.reserve(dynamic_response.size() * 2);
+            for (uint8_t byte : dynamic_response) {
+              encoded.push_back(hex[byte >> 4]);
+              encoded.push_back(hex[byte & 0x0F]);
+            }
+            id(openrbus_read_response).assign(dynamic_response.begin(), dynamic_response.end());
+            id(openrbus_read_raw_response).publish_state(encoded);
+            id(openrbus_read_generation_counter)++;
+            id(openrbus_read_generation).publish_state(
+                static_cast<float>(id(openrbus_read_generation_counter)));
+            id(openrbus_last_request_id).publish_state(std::to_string(dynamic_request_id));
+            id(openrbus_pairing_status).publish_state("openrbus_dynamic_response");
+            ESP_LOGD("openrbus_transport", "response request_id=%lu generation=%lu bytes=%u",
+                     static_cast<unsigned long>(dynamic_request_id),
+                     static_cast<unsigned long>(dynamic_generation),
+                     static_cast<unsigned>(dynamic_response.size()));
+          }
           const uint32_t now = millis();
           if (id(openrbus_pair_state) == 1 && static_cast<int32_t>(now - id(openrbus_pair_deadline)) >= 0) {
             id(openrbus_pair_state) = 2;
@@ -409,6 +458,11 @@ text_sensor:
     name: "OpenRBus Read Raw Response"
     entity_category: diagnostic
     update_interval: never
+  - platform: template
+    id: openrbus_last_request_id
+    name: "OpenRBus Last Request ID"
+    entity_category: diagnostic
+    update_interval: never
   - platform: ble_client
     id: openrbus_gateway_ident_notification
     ble_client_id: ehc16_ble_client
@@ -435,6 +489,7 @@ text_sensor:
         - lambda: |-
             id(openrbus_gateway_auth_ok) = x.size() == 1 && uint8_t(x[0]) == 1;
             id(openrbus_gateway_auth_ready) = true;
+            openrbus_phase2::instance().set_authenticated(id(openrbus_gateway_auth_ok));
   - platform: ble_client
     id: openrbus_extended_response
     ble_client_id: ehc16_ble_client
