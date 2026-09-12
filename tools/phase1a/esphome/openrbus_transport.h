@@ -118,6 +118,14 @@ class Transport : public esphome::ble_client::BLEClientNode,
         if (this->request_in_flight_ && this->write_completed_ &&
             param->notify.handle == this->transport_handle_ &&
             param->notify.value_len != 0) {
+          if (param->notify.value_len > MAX_RESPONSE_BYTES) {
+            this->request_in_flight_ = false;
+            this->write_completed_ = false;
+            this->request_id_ = 0;
+            this->state_ = State::ERROR;
+            ESP_LOGW(TAG, "raw response rejected: notification too large");
+            break;
+          }
           this->response_.assign(param->notify.value, param->notify.value + param->notify.value_len);
           this->response_ready_ = true;
           this->request_in_flight_ = false;
@@ -195,6 +203,7 @@ class Transport : public esphome::ble_client::BLEClientNode,
 
   static constexpr const char *TAG = "openrbus_transport";
   static constexpr uint32_t REQUEST_TIMEOUT_MS = 10000;
+  static constexpr uint16_t MAX_RESPONSE_BYTES = 512;
   esphome::ble_client::BLEClient *parent_{nullptr};
   uint16_t transport_handle_{0};
   uint32_t request_id_{0};

@@ -27,6 +27,7 @@ class Phase2TransportStaticChecks(unittest.TestCase):
         self.assertIn("request_id < 0", HEADER)
         self.assertIn("frame.size() > 128", HEADER)
         self.assertIn("bytes.size() > 64", HEADER)
+        self.assertIn("MAX_RESPONSE_BYTES", HEADER)
         self.assertIn("this->enabled_", HEADER)
         self.assertIn("this->request_in_flight_ = false", HEADER)
         self.assertIn("this->write_completed_ = false", HEADER)
