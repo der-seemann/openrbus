@@ -21,7 +21,7 @@ class Transport : public esphome::ble_client::BLEClientNode,
   enum class State : uint8_t { NOT_READY, AUTHENTICATING, READY, REQUEST_IN_FLIGHT, ERROR };
 
   void begin(esphome::ble_client::BLEClient *client) {
-    if (this->parent_ != nullptr)
+    if (this->parent_ != nullptr || client == nullptr)
       return;
     this->parent_ = client;
     client->register_ble_node(this);
@@ -34,7 +34,27 @@ class Transport : public esphome::ble_client::BLEClientNode,
     if (!authenticated) {
       this->state_ = State::NOT_READY;
       this->request_in_flight_ = false;
-    } else if (this->transport_handle_ != 0) {
+      this->write_completed_ = false;
+      this->request_id_ = 0;
+      this->response_.clear();
+      this->response_ready_ = false;
+    } else if (this->enabled_ && this->transport_handle_ != 0) {
+      this->state_ = State::READY;
+    } else {
+      this->state_ = State::AUTHENTICATING;
+    }
+  }
+
+  void set_enabled(bool enabled) {
+    this->enabled_ = enabled;
+    if (!enabled) {
+      this->request_in_flight_ = false;
+      this->write_completed_ = false;
+      this->request_id_ = 0;
+      this->response_.clear();
+      this->response_ready_ = false;
+      this->state_ = State::NOT_READY;
+    } else if (this->authenticated_ && this->transport_handle_ != 0) {
       this->state_ = State::READY;
     } else {
       this->state_ = State::AUTHENTICATING;
@@ -49,7 +69,7 @@ class Transport : public esphome::ble_client::BLEClientNode,
     generation = this->generation_;
     this->response_.clear();
     this->response_ready_ = false;
-    this->state_ = this->authenticated_ && this->transport_handle_ != 0 ? State::READY : State::NOT_READY;
+    this->state_ = this->enabled_ && this->authenticated_ && this->transport_handle_ != 0 ? State::READY : State::NOT_READY;
     return true;
   }
 
@@ -69,22 +89,27 @@ class Transport : public esphome::ble_client::BLEClientNode,
             esphome::esp32_ble_tracker::ESPBTUUID::from_raw(write_uuid));
         this->transport_handle_ = chr == nullptr ? 0 : chr->handle;
         this->node_state = esphome::esp32_ble_tracker::ClientState::ESTABLISHED;
-        this->state_ = this->authenticated_ && this->transport_handle_ != 0 ? State::READY : State::AUTHENTICATING;
+        this->state_ = this->enabled_ && this->authenticated_ && this->transport_handle_ != 0 ? State::READY : State::AUTHENTICATING;
         break;
       }
       case ESP_GATTC_WRITE_CHAR_EVT:
-        if (this->request_in_flight_ && param->write.handle == this->transport_handle_ &&
-            param->write.status != ESP_GATT_OK) {
-          this->state_ = State::ERROR;
-          this->request_in_flight_ = false;
+        if (this->request_in_flight_ && param->write.handle == this->transport_handle_) {
+          if (param->write.status != ESP_GATT_OK) {
+            this->state_ = State::ERROR;
+            this->request_in_flight_ = false;
+          } else {
+            this->write_completed_ = true;
+          }
         }
         break;
       case ESP_GATTC_NOTIFY_EVT:
-        if (this->request_in_flight_ && param->notify.handle == this->transport_handle_ &&
+        if (this->request_in_flight_ && this->write_completed_ &&
+            param->notify.handle == this->transport_handle_ &&
             param->notify.value_len != 0) {
           this->response_.assign(param->notify.value, param->notify.value + param->notify.value_len);
           this->response_ready_ = true;
           this->request_in_flight_ = false;
+          this->write_completed_ = false;
           this->generation_++;
           this->state_ = State::READY;
         }
@@ -93,8 +118,10 @@ class Transport : public esphome::ble_client::BLEClientNode,
       case ESP_GATTC_CLOSE_EVT:
         this->transport_handle_ = 0;
         this->request_in_flight_ = false;
+        this->write_completed_ = false;
         this->response_.clear();
         this->response_ready_ = false;
+        this->request_id_ = 0;
         this->state_ = State::NOT_READY;
         this->authenticated_ = false;
         this->node_state = esphome::esp32_ble_tracker::ClientState::IDLE;
@@ -107,17 +134,19 @@ class Transport : public esphome::ble_client::BLEClientNode,
  protected:
   void api_request(int32_t request_id, std::string frame) {
     std::vector<uint8_t> bytes;
-    if (!parse_hex(frame, bytes) || bytes.empty() || bytes.size() > 64) {
+    if (request_id < 0 || frame.size() > 128 || !parse_hex(frame, bytes) || bytes.empty() || bytes.size() > 64) {
       this->state_ = State::ERROR;
       ESP_LOGW(TAG, "raw request rejected: malformed frame");
       return;
     }
-    if (!this->authenticated_ || this->transport_handle_ == 0 || this->request_in_flight_) {
+    if (!this->enabled_ || !this->authenticated_ || this->transport_handle_ == 0 || this->request_in_flight_ ||
+        this->response_ready_) {
       this->state_ = State::ERROR;
       ESP_LOGW(TAG, "raw request rejected: transport not ready or busy");
       return;
     }
     this->request_id_ = static_cast<uint32_t>(request_id);
+    this->write_completed_ = false;
     esp_err_t err = esp_ble_gattc_write_char(
         this->parent_->get_gattc_if(), this->parent_->get_conn_id(), this->transport_handle_, bytes.size(),
         bytes.data(), ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_MITM);
@@ -131,7 +160,7 @@ class Transport : public esphome::ble_client::BLEClientNode,
   }
 
   static bool parse_hex(const std::string &text, std::vector<uint8_t> &out) {
-    if (text.empty() || (text.size() & 1) != 0)
+    if (text.empty() || text.size() > 128 || (text.size() & 1) != 0)
       return false;
     out.reserve(text.size() / 2);
     for (size_t i = 0; i < text.size(); i += 2) {
@@ -156,8 +185,10 @@ class Transport : public esphome::ble_client::BLEClientNode,
   uint16_t transport_handle_{0};
   uint32_t request_id_{0};
   uint32_t generation_{0};
+  bool enabled_{false};
   bool authenticated_{false};
   bool request_in_flight_{false};
+  bool write_completed_{false};
   bool response_ready_{false};
   State state_{State::NOT_READY};
   std::vector<uint8_t> response_;

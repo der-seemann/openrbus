@@ -190,11 +190,13 @@ api:
       then:
         - lambda: |-
             id(openrbus_dynamic_session) = true;
+            openrbus_phase2::instance().set_enabled(true);
             id(openrbus_pairing_status).publish_state("dynamic_session_enabled");
     - action: openrbus_disable_dynamic_transport
       then:
         - lambda: |-
             id(openrbus_dynamic_session) = false;
+            openrbus_phase2::instance().set_enabled(false);
             id(openrbus_pairing_status).publish_state("dynamic_session_disabled");
             id(ehc16_ble_client).disconnect();
     - action: openrbus_reboot
