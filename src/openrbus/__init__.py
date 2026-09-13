@@ -50,6 +50,13 @@ from .errors import (
     WritesDisabledError,
     WriteVerificationError,
 )
+from .inventory import (
+    DeviceInventory,
+    DiscoveryStatus,
+    ObjectCapability,
+    ObjectSupport,
+    classify_abort,
+)
 from .object_client import RawObjectClient
 from .protocol import ObjectAddress
 from .registry import (
@@ -85,13 +92,17 @@ __all__ = [
     "ChecksumError",
     "ConnectionFailedError",
     "DeviceIdentity",
+    "DeviceInventory",
+    "DiscoveryStatus",
     "GatewayAuthorizationResult",
     "InsufficientAccessLevelError",
     "NodeAuthorizationError",
     "NodeAuthorizationResult",
     "NodeAuthorizer",
     "ObjectAddress",
+    "ObjectCapability",
     "ObjectRead",
+    "ObjectSupport",
     "OpenRBusClient",
     "OpenRBusError",
     "ProtocolError",
@@ -118,6 +129,7 @@ __all__ = [
     "WriteVerificationError",
     "WritesDisabledError",
     "assigned_nodes",
+    "classify_abort",
     "compute_authentication_response",
     "discover_capabilities",
     "discover_devices",
