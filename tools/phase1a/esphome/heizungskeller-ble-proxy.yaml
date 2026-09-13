@@ -106,8 +106,16 @@ api:
                   if (characteristic == nullptr) {
                     id(openrbus_pairing_status).publish_state("gateway_ident_characteristic_missing");
                   } else {
+                    // A reconnect with an existing bond does not reliably trigger
+                    // link encryption on its own.  Reuse ESPHome's established
+                    // security path before the ATT gate can release CCCD/IdentInfo.
+                    const esp_err_t security_err = id(ehc16_ble_client).pair();
+                    if (security_err != ESP_OK) {
+                      id(openrbus_pairing_status).publish_state("security_request_failed");
+                      ESP_LOGW("openrbus_pairing", "Security request failed: %d", security_err);
+                    }
                     openrbus_phase1a::write_empty_with_response(
-                      id(ehc16_ble_client), characteristic->handle);
+                        id(ehc16_ble_client), characteristic->handle);
                     id(openrbus_pairing_status).publish_state("gateway_ident_sent");
                   }
               - wait_until:
