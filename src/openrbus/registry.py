@@ -428,6 +428,56 @@ class RegistryMetadata:
     attribution: str
 
 
+class RegistryMatchStatus(StrEnum):
+    """Conservative runtime identity resolution outcome."""
+
+    EXACT = "exact"
+    AMBIGUOUS = "ambiguous"
+    UNKNOWN = "unknown"
+
+
+class RegistryEvidenceKind(StrEnum):
+    """Trust class for an identity assertion."""
+
+    TRUSTED = "trusted"
+    DISCOVERED = "discovered"
+
+
+@dataclass(frozen=True, slots=True)
+class RegistryMatch:
+    """Family resolution and its caller-supplied evidence provenance."""
+
+    family: str | None
+    status: RegistryMatchStatus
+    reason: str
+    evidence: tuple[IdentityEvidence, ...] = ()
+
+    @property
+    def provenance(self) -> tuple[str, ...]:
+        """Stable display form; typed evidence remains available separately."""
+
+        return tuple(
+            sorted(f"{item.source_kind.value}:{item.provenance}" for item in self.evidence)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class IdentityEvidence:
+    """One typed, reviewable identity assertion."""
+
+    family: str
+    source_kind: RegistryEvidenceKind
+    provenance: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.family, str) or not isinstance(self.provenance, str):
+            raise TypeError("identity evidence family and provenance must be strings")
+        if not isinstance(self.source_kind, RegistryEvidenceKind):
+            raise TypeError("identity evidence source_kind must be RegistryEvidenceKind")
+        if not self.family.strip() or not self.provenance.strip():
+            raise ValueError("identity evidence family and provenance are required")
+
+
 class Registry:
     """Immutable, indexed view of a normalized OpenRBus registry."""
 
@@ -493,6 +543,37 @@ class Registry:
         )
         self._enum_map: Mapping[str, EnumDefinition] = MappingProxyType(enum_map)
         self._structure_map: Mapping[str, StructureDefinition] = MappingProxyType(structure_map)
+
+    def match_identity(
+        self,
+        identity: Any,
+        evidence: Mapping[tuple[int, int], Iterable[IdentityEvidence]] | None = None,
+    ) -> RegistryMatch:
+        """Resolve a runtime identity using explicit, external evidence only.
+
+        The public registry contains register support, not identity assertions.
+        Therefore the default is always ``unknown``.  ``evidence`` maps the
+        jointly observed ``(device_code, parameter_number)`` pair to families
+        and provenance strings.  Multiple families remain ambiguous.
+        """
+
+        if identity.device_code is None or identity.parameter_number is None:
+            return RegistryMatch(None, RegistryMatchStatus.UNKNOWN, "identity pair incomplete")
+        row = (identity.device_code, identity.parameter_number)
+        record = tuple((evidence or {}).get(row, ()))
+        if any(not isinstance(item, IdentityEvidence) for item in record):
+            raise TypeError("identity evidence must use IdentityEvidence records")
+        if not record:
+            return RegistryMatch(None, RegistryMatchStatus.UNKNOWN, "no explicit identity evidence")
+        families = tuple(sorted({item.family for item in record}))
+        if len(families) != 1:
+            return RegistryMatch(
+                None,
+                RegistryMatchStatus.AMBIGUOUS,
+                "identity evidence names multiple families",
+                record,
+            )
+        return RegistryMatch(families[0], RegistryMatchStatus.EXACT, "exact identity pair", record)
 
     def __len__(self) -> int:
         return len(self.registers)

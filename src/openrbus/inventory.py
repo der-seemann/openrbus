@@ -14,6 +14,7 @@ from time import time
 from openrbus.discovery import DeviceIdentity
 from openrbus.errors import CanOpenAbortError
 from openrbus.protocol.canip import ObjectAddress
+from openrbus.registry import IdentityEvidence, Registry, RegistryMatch
 
 
 class DiscoveryStatus(StrEnum):
@@ -52,8 +53,21 @@ class DeviceInventory:
     identity: DeviceIdentity
     status: DiscoveryStatus = DiscoveryStatus.DISCOVERED
     registry_match: str | None = None
+    registry_resolution: RegistryMatch | None = None
     capabilities: dict[ObjectAddress, ObjectCapability] = field(default_factory=dict)
     last_seen: float = field(default_factory=time)
+
+    def resolve_registry(
+        self,
+        registry: Registry,
+        evidence: dict[tuple[int, int], tuple[IdentityEvidence, ...]] | None = None,
+    ) -> RegistryMatch:
+        """Apply explicit identity evidence and retain the match outcome."""
+
+        result = registry.match_identity(self.identity, evidence)
+        self.registry_resolution = result
+        self.registry_match = result.family
+        return result
 
     def record(self, capability: ObjectCapability) -> None:
         """Record the latest read-only observation for an object."""
