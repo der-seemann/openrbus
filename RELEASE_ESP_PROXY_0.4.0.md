@@ -78,17 +78,16 @@ Completed without hardware access:
 
 * ESPHome static contract tests: 11 passed.
 * Combined Thin-GATT tests and ESP static tests: 18 passed.
+* Additional selected RPC/session contracts: 43 passed; unittest contracts: 13 passed.
 * Ruff check and format check for changed Python review tools: passed.
 * `git diff --check`: passed.
 * publication/secret/tree audit: passed.
 
-The ESPHome compiler was not available in this environment. Installing the
-exact `esphome==2026.8.2` toolchain was attempted in the isolated project
-environment but stopped at the host disk quota (`Errno 122`), so a fresh
-ESPHome 2026.8.2 / ESP-IDF representative compile is still required in CI or
-an isolated build container. No live device was flashed. Hardware acceptance
-must remain private and must not be represented by production addresses,
-credentials, traces, or binary artifacts in the release.
+* Representative ESPHome **2026.8.2** / ESP-IDF **5.5.5** `esp32dev`
+  compile with fictional temporary secrets: passed. No flash or OTA was run.
+  The temporary build output stayed outside the release tree and was scanned
+  for installation identifiers before disposal. The generated firmware is not
+  a release artifact.
 
 Source hashes for this review snapshot:
 
@@ -96,7 +95,7 @@ Source hashes for this review snapshot:
 openrbus_gatt_rpc.h       7aa6ec0a208866880e020f3f7bbfba0962ed5172d264360008644ef664c76299
 openrbus_transport.h      803fbbd8c60bb039616077082df2db9e9baf4b3adae60efd045a55847ead4643
 openrbus_zero_write.h     6f88a36ffa57f1ad88adfc419bd25e9c5244964096f53501d73583cf685c268b
-openrbus-ble-proxy.yaml   c808e8dedced832d6b3b605ca3b0e3c01e5d9879c782c33d9d8221145ccc09f8
+openrbus-ble-proxy.yaml   26a843892ea8f77c0ce429edad9164dd00e232d741b7b1cf7c34f677829e7f3f
 ```
 
 ## GitHub release preflight

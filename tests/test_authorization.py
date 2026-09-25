@@ -33,8 +33,8 @@ DUMMY_KEY_BYTES = bytes.fromhex("11223344")
 class FakeMessageTransport:
     def __init__(self) -> None:
         self.responses = [
-            bytes.fromhex("01TESTSANITIZED000000000000"),
-            bytes.fromhex("01TESTSANITIZED000000000000"),
+            bytes.fromhex("010200000201000011223344556677"),
+            bytes.fromhex("01020000020300ff01ff01"),
         ]
         self.requests: list[bytes] = []
         self.is_connected = True
@@ -119,7 +119,7 @@ def test_tea_response_has_stable_synthetic_vector_and_redacted_repr() -> None:
 @pytest.mark.asyncio
 async def test_canip_gateway_authorizer_uses_network_order_and_redacts_result() -> None:
     transport = FakeMessageTransport()
-    transport.responses[1] = bytes.fromhex("01TESTSANITIZED000000000000")
+    transport.responses[1] = bytes.fromhex("01020000020300ff03ff01")
     result = await CanIpGatewayAuthorizer(transport, max_access_level=3).authorize(
         3,
         key_component=DUMMY_KEY_BYTES,
@@ -143,7 +143,7 @@ async def test_canip_gateway_authorizer_uses_network_order_and_redacts_result() 
 @pytest.mark.asyncio
 async def test_canip_gateway_authorizer_types_mismatching_confirmation() -> None:
     transport = FakeMessageTransport()
-    transport.responses[1] = bytes.fromhex("01TESTSANITIZED000000000000")
+    transport.responses[1] = bytes.fromhex("01020000020300fe03ff01")
     with pytest.raises(AuthorizationCorrelationError, match="does not correlate"):
         await CanIpGatewayAuthorizer(transport, max_access_level=3).authorize(
             3, key_component=DUMMY_KEY_BYTES
@@ -153,12 +153,12 @@ async def test_canip_gateway_authorizer_types_mismatching_confirmation() -> None
 @pytest.mark.asyncio
 async def test_canip_gateway_authorizer_uses_requested_level_in_channel_and_tea() -> None:
     level_one = FakeMessageTransport()
-    level_one.responses[1] = bytes.fromhex("01TESTSANITIZED000000000000")
+    level_one.responses[1] = bytes.fromhex("01020000020300ff01ff01")
     await CanIpGatewayAuthorizer(level_one, max_access_level=3).authorize(
         1, key_component=DUMMY_KEY_BYTES
     )
     level_three = FakeMessageTransport()
-    level_three.responses[1] = bytes.fromhex("01TESTSANITIZED000000000000")
+    level_three.responses[1] = bytes.fromhex("01020000020300ff03ff01")
     await CanIpGatewayAuthorizer(level_three, max_access_level=3).authorize(
         3, key_component=DUMMY_KEY_BYTES
     )
@@ -176,9 +176,9 @@ async def test_canip_gateway_authorizer_uses_requested_level_in_channel_and_tea(
 @pytest.mark.parametrize(
     ("confirmation", "error"),
     [
-        ("01TESTSANITIZED000000000000", "does not correlate"),
-        ("01TESTSANITIZED000000000000", "gateway rejected"),
-        ("01TESTSANITIZED000000000000", "function is unexpected"),
+        ("01020000020300ff02ff01", "does not correlate"),
+        ("01020000020300ff030000", "gateway rejected"),
+        ("01020000020200ff03ff01", "function is unexpected"),
         ("01020000020300ff03ff", "invalid length"),
     ],
 )
@@ -199,7 +199,7 @@ async def test_canip_unexpected_function_is_a_correlation_failure() -> None:
 
     transport = FakeMessageTransport()
     # Function 1 is a valid purpose-2 frame, but cannot answer Function 2.
-    transport.responses[1] = bytes.fromhex("01TESTSANITIZED000000000000")
+    transport.responses[1] = bytes.fromhex("0102000002010011223344556677")
     with pytest.raises(AuthorizationCorrelationError, match="function is unexpected"):
         await CanIpGatewayAuthorizer(transport, max_access_level=3).authorize(
             3, key_component=DUMMY_KEY_BYTES

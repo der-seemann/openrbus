@@ -8,7 +8,7 @@ from openrbus.protocol.crc import crc16_modbus_bytes
 
 
 def test_known_synthetic_single_segment_crc() -> None:
-    message = bytes.fromhex("01TESTSANITIZED000000000000")
+    message = bytes.fromhex("0102000000000001200102")
     segment = BleSegmentCodec().encode(message)
     assert segment == (b"\xff" + message + crc16_modbus_bytes(message),)
     assert BleSegmentReassembler().feed(segment[0]) == message

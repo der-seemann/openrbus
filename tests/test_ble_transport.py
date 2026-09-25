@@ -19,7 +19,7 @@ from openrbus.transport.ble import (
 
 
 def test_hardware_verified_extended_response_uuid() -> None:
-    assert RESPONSE_EXTENDED == "00000000-0000-4000-8000-000000000001"
+    assert RESPONSE_EXTENDED == "ab9af948-fb86-492d-820d-bdea2dcb7ecf"
 
 
 class FakeBleakClient:
@@ -221,7 +221,7 @@ async def test_ble_discovery_filters_by_service_uuid() -> None:
         async def discover(*, timeout: float, return_adv: bool):
             assert return_adv
             return {
-                "a": ("match", Advertisement(["00000000-0000-4000-8000-000000000001"])),
+                "a": ("match", Advertisement(["f8fc98e4-5919-4a5c-852e-dfe04ad383c0"])),
                 "b": ("other", Advertisement([])),
             }
 

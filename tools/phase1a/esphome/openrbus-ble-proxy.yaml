@@ -13,9 +13,8 @@ esphome:
             // Thin-RPC owns the BLE lifecycle; fence the legacy pairing
             // watchdog so it cannot disconnect an authenticated session.
             id(openrbus_thin_rpc_active) = true;
-  platformio_options:
-    build_flags:
-      - -DESPHOME_BLE_DEVICE_BASE_LISTENER_COUNT=1
+  build_flags:
+    - -DESPHOME_BLE_DEVICE_BASE_LISTENER_COUNT=1
   includes:
     - openrbus_zero_write.h
     - openrbus_transport.h
@@ -190,8 +189,8 @@ api:
                         };
                     - ble_client.ble_write:
                         id: ehc16_ble_client
-                        service_uuid: 00000000-0000-4000-8000-000000000001
-                        characteristic_uuid: 00000000-0000-4000-8000-000000000001
+                        service_uuid: 6a37b97e-779d-457f-8182-edf334edd01f
+                        characteristic_uuid: f1ca5aeb-02cd-44a8-972b-44b6e7250d0b
                         value: !lambda return id(openrbus_gateway_auth_payload);
                     - wait_until:
                         condition:
@@ -215,8 +214,8 @@ api:
                               id(openrbus_pairing_status).publish_state("openrbus_read_sent");
                           - ble_client.ble_write:
                               id: ehc16_ble_client
-                              service_uuid: 00000000-0000-4000-8000-000000000001
-                              characteristic_uuid: 00000000-0000-4000-8000-000000000001
+                              service_uuid: f8fc98e4-5919-4a5c-852e-dfe04ad383c0
+                              characteristic_uuid: 496b1b03-cebc-4d59-9c32-14ea88c266f9
                               value: [0xFF, 0x01, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0x20, 0x01, 0x02, 0x5D, 0x12]
                           - wait_until:
                               condition:
@@ -553,8 +552,8 @@ text_sensor:
   - platform: ble_client
     id: openrbus_gateway_ident_notification
     ble_client_id: ehc16_ble_client
-    service_uuid: 00000000-0000-4000-8000-000000000001
-    characteristic_uuid: 00000000-0000-4000-8000-000000000001
+    service_uuid: 6a37b97e-779d-457f-8182-edf334edd01f
+    characteristic_uuid: 69092300-a182-4fea-803b-24ada406da8a
     notify: true
     internal: true
     on_notify:
@@ -565,8 +564,8 @@ text_sensor:
   - platform: ble_client
     id: openrbus_gateway_auth_notification
     ble_client_id: ehc16_ble_client
-    service_uuid: 00000000-0000-4000-8000-000000000001
-    characteristic_uuid: 00000000-0000-4000-8000-000000000001
+    service_uuid: 6a37b97e-779d-457f-8182-edf334edd01f
+    characteristic_uuid: e2c47825-6dff-4d79-b74a-5bdc4f4661cf
     # The ATT gate defers this subscription until MITM encryption is active;
     # the original pre-auth sequence still contains only IdentInfo.
     notify: true
@@ -586,8 +585,8 @@ text_sensor:
   - platform: ble_client
     id: openrbus_extended_response
     ble_client_id: ehc16_ble_client
-    service_uuid: 00000000-0000-4000-8000-000000000001
-    characteristic_uuid: 00000000-0000-4000-8000-000000000001
+    service_uuid: f8fc98e4-5919-4a5c-852e-dfe04ad383c0
+    characteristic_uuid: ab9af948-fb86-492d-820d-bdea2dcb7ecf
     notify: true
     internal: true
     on_notify:

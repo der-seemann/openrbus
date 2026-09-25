@@ -16,7 +16,7 @@ def test_nonsegmented_rub_round_trip_uses_separate_header_and_message_checksums(
 
 def test_statically_derived_synthetic_rub_vector() -> None:
     assert RubFrame(payload_id=1, payload=bytes.fromhex("020000000000")).encode().hex() == (
-        "01TESTSANITIZED000000000000"
+        "0102001006e70200000000005ad6"
     )
 
 
