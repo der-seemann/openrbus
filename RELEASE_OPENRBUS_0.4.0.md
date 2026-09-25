@@ -79,7 +79,7 @@ Completed in this environment:
 - clean sdist/wheel build — passed
 - `twine check --strict` — passed
 - clean wheel installation/import smoke test — passed (`openrbus==0.4.0`)
-- source archive and wheel privacy audit — passed (129 archive members)
+- source archive and wheel privacy audit — passed (128 archive members)
 - `git diff --check` — passed
 - TOML metadata parse — passed
 - read-only remote/default-branch/tag/workflow inspection — completed
