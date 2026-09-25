@@ -1,0 +1,21 @@
+This patch is applied to the local ESPHome build input
+`openrbus-ble-proxy.yaml`; local secret material must remain in the ignored
+`secrets.yaml` file and outside the repository.
+
+1. Add a restored `uint32_t openrbus_read_generation_counter` global,
+   initialized to zero. Persistence normally keeps the marker monotonic;
+   HA also accepts a changed marker after a reset/reconnect.
+2. Add a diagnostic template sensor with id
+   `openrbus_read_generation`, update interval `never`, and zero decimal
+   places.
+3. In `openrbus_extended_response.on_notify`, after publishing the raw
+   response, increment the counter and publish it when `openrbus_read_ready`
+   is true:
+
+       id(openrbus_read_generation_counter)++;
+       id(openrbus_read_generation).publish_state(
+         static_cast<float>(id(openrbus_read_generation_counter)));
+
+This marker is the completion/freshness contract for HA. It must be published
+for every valid final response, including responses whose raw value is
+identical to the previous one.

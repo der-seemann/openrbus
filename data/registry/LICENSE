@@ -1,0 +1,16 @@
+OpenRBus Register Registry
+
+SPDX-License-Identifier: CC-BY-4.0
+
+Copyright (c) OpenRBus contributors.
+
+The normalized register dataset in this directory is licensed under the
+Creative Commons Attribution 4.0 International license (CC BY 4.0):
+
+https://creativecommons.org/licenses/by/4.0/legalcode
+
+Attribution: "OpenRBus register registry, OpenRBus contributors, CC BY 4.0".
+Redistributors must retain attribution and indicate if they modified the data.
+
+This data license does not apply to OpenRBus source code, which is licensed
+separately under Apache-2.0.

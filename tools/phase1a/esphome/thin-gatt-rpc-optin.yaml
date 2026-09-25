@@ -1,0 +1,52 @@
+# Portable additive ESPHome package fragment.  A caller includes this package
+# from its existing BLE runtime; the compile harness creates that wrapper in a
+# private stage from an explicit --base-config path.
+
+esphome:
+  includes:
+    - openrbus_gatt_rpc.h
+  on_boot:
+    - priority: -100
+      then:
+        - lambda: |-
+            // capability: openrbus_thin_gatt.v1
+            // Thin-RPC is attached to the existing Known-Good BLE client.
+            // Thin-RPC is the sole BLE lifecycle owner in this deployment;
+            // disable the reference fixture's legacy pairing/disconnect loop.
+            id(openrbus_thin_rpc_active) = true;
+            openrbus_thin_gatt::instance().begin(id(ehc16_ble_client));
+
+# Dependency explicitly instantiated by the Thin-RPC header's bounded JSON
+# envelope helper; this does not add any runtime BLE or transport path.
+json: {}
+
+# The singleton is attached to the existing BLE client from on_boot and is
+# intentionally not declared as a second ESPHome component.  This bounded
+# scheduler tick drives deferred CONNECT completion reliably.
+interval:
+  - interval: 100ms
+    then:
+      - lambda: |-
+          openrbus_thin_gatt::instance().loop();
+
+api:
+  actions:
+    - action: openrbus_gatt_rpc_request
+      variables:
+        request_id: int
+        frame: string
+      then:
+        - lambda: |-
+            openrbus_thin_gatt::instance().api_request(request_id, frame);
+    - action: openrbus_gatt_rpc_poll
+      supports_response: only
+      then:
+        - api.respond:
+            data: !lambda |-
+              root["frame"] = openrbus_thin_gatt::instance().poll_frame();
+    - action: openrbus_gatt_rpc_diagnostics
+      supports_response: only
+      then:
+        - api.respond:
+            data: !lambda |-
+              root["snapshot"] = openrbus_thin_gatt::instance().diagnostics_snapshot();

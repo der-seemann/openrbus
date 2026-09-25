@@ -1,0 +1,14 @@
+include CONTRIBUTING.md
+include DISCLAIMER.md
+include README.md
+include SECURITY.md
+recursive-include LICENSES *.txt
+recursive-include data/registry *
+recursive-include docs *.md
+recursive-include tools *.py
+
+# ESPHome creates substantial local build/dependency trees below these paths.
+# They are disposable and must never enter source distributions (they can
+# contain board-specific names, logs, and generated toolchain files).
+prune tools/phase1a/esphome/.esphome
+prune tools/phase1a/esphome/canonical-thin-scan-auth-20260920/.esphome
