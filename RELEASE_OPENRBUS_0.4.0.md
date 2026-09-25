@@ -62,6 +62,10 @@ contains older installation identifiers; history rewriting was not performed.
 Before release, inspect the exact commit and both archives again, including
 all files added by the coordinated HA/ESP changes.
 
+The observed Home Assistant test topology contained 1,799 OpenRBus entities.
+That is a node- and catalog-dependent validation result, not a universal
+entity-count promise for other installations.
+
 ## Tests and static checks
 
 Completed in this environment:

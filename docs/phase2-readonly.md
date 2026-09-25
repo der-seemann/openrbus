@@ -12,11 +12,11 @@ node.  It does not scan all 256 node addresses.  The optional `5826` directory
 is retained as opaque capability references until its flags have a confirmed
 meaning.
 
-The live gateway target `FF` currently confirms `2001:02` (device code `7702`).
-The candidate objects `5013:00`, `5016:00` and `501E:00` returned the protocol
-negative response `0x06020000` at that target; they are therefore classified as
-`NOT_SUPPORTED`, not as transport failures or HA entities.  They must only be
-retried after a real bus node has been discovered.
+Validation of this path used a synthetic, bounded node topology.  A release
+does not promise that any particular bus target, device code, object, or
+negative response is present on every installation.  Unsupported objects must
+be classified as `NOT_SUPPORTED`, not as transport failures or HA entities,
+and must only be retried after a real bus node has been discovered.
 
 ## Single and batch reads
 
