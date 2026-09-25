@@ -73,23 +73,20 @@ Completed in this environment:
 - `python3 -m compileall -q src tests tools`
 - `python3 -m py_compile tools/check_publication.py tools/check_artifacts.py`
 - `python3 tools/check_publication.py` — passed
+- full `pytest` suite — passed
+- Ruff check and format check — passed
+- strict mypy check — passed
+- clean sdist/wheel build — passed
+- `twine check --strict` — passed
+- clean wheel installation/import smoke test — passed (`openrbus==0.4.0`)
+- source archive and wheel privacy audit — passed (129 archive members)
 - `git diff --check` — passed
 - TOML metadata parse — passed
 - read-only remote/default-branch/tag/workflow inspection — completed
 
-Not completed here because the environment lacked an installed test/build
-toolchain and the attempted temporary install exceeded the available disk
-quota:
-
-- full `pytest`, Ruff, mypy;
-- clean `python -m build` sdist/wheel;
-- `twine check --strict`;
-- clean-venv wheel/sdist installation smoke test;
-- archive privacy audit on the final coordinated artifact set.
-
-The release owner must run these in CI or a clean release environment and
-attach the resulting package hashes to the private release record, not this
-public report.
+The release owner must repeat these checks in CI or a clean release
+environment before publication and attach the resulting package hashes to the
+private release record, not this public report.
 
 ## Packaging guidance
 

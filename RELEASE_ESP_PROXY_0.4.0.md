@@ -84,10 +84,10 @@ Completed without hardware access:
 * publication/secret/tree audit: passed.
 
 * Representative ESPHome **2026.8.2** / ESP-IDF **5.5.5** `esp32dev`
-  compile with fictional temporary secrets: passed. No flash or OTA was run.
-  The temporary build output stayed outside the release tree and was scanned
-  for installation identifiers before disposal. The generated firmware is not
-  a release artifact.
+  compile was not completed in the final sanitized gate: the isolated
+  ESPHome installation attempt stopped at the host disk-quota limit before
+  the compiler became available. No flash or OTA was run. The generated
+  firmware is not a release artifact.
 
 Source hashes for this review snapshot:
 
