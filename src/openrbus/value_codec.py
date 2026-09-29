@@ -8,6 +8,7 @@ corresponding framing codecs.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import TypeAlias
 
@@ -39,6 +40,12 @@ class CanOpenTimeOfDay:
             raise ValueError("milliseconds must be within one day")
         if not 0 <= self.days <= 0xFFFF:
             raise ValueError("days must fit in an unsigned 16-bit value")
+
+    @property
+    def protocol_date(self) -> date:
+        """Return the standardized calendar date without timezone semantics."""
+
+        return date(1984, 1, 1) + timedelta(days=self.days)
 
 
 @dataclass(frozen=True, slots=True)

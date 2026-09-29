@@ -1,6 +1,6 @@
 # OpenRBus
 
-OpenRBus 0.4.0 is an experimental, vendor-independent Python protocol core for
+OpenRBus 0.4.1 is an experimental, vendor-independent Python protocol core for
 reading CANopen-style objects from compatible BDR Thermea heating systems. It
 provides validated BLE segmentation, CAN-IP object access, a normalized public
 register registry, and an asynchronous high-level client.
@@ -46,7 +46,7 @@ For a released version, install the pinned package instead of an editable
 checkout:
 
 ```console
-python -m pip install 'openrbus[ble]==0.4.0'
+python -m pip install 'openrbus[ble]==0.4.1'
 ```
 
 ## Reading an object

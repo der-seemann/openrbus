@@ -61,6 +61,24 @@ class RegisterCatalogEntry:
 def _entry(
     node: int, definition: RegisterDefinition, family: str | None, address: ObjectAddress
 ) -> RegisterCatalogEntry:
+    write_requirement = definition.access_requirement(
+        address, AccessOperation.WRITE, device_family=family
+    )
+    matching_write_rows = tuple(
+        row
+        for row in definition.evidence.devices
+        if row.address == address
+        and family is not None
+        and row.family.casefold() == family.casefold()
+    )
+    evidenced_writable = (
+        definition.access.writable_declared
+        and definition.safety.write.value == "validated"
+        and write_requirement.is_known
+        and bool(matching_write_rows)
+        and all(row.writable_all is True for row in matching_write_rows)
+    )
+
     def evidence(operation: AccessOperation) -> dict[str, object]:
         requirement = definition.access_requirement(address, operation, device_family=family)
         return {
@@ -85,7 +103,7 @@ def _entry(
         scale=definition.wire.gain,
         unit=definition.wire.unit,
         readable=definition.access.readable_declared,
-        writable=definition.access.writable_declared,
+        writable=evidenced_writable,
         access_level_evidence={
             "read": evidence(AccessOperation.READ),
             "write": evidence(AccessOperation.WRITE),

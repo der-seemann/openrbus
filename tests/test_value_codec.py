@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -90,6 +91,7 @@ def test_canopen_time_of_day_keeps_calendar_counter_explicit(registry: Registry)
     encoded = encode_value(definition, ObjectAddress(0x504B, 0), value, registry=registry)
     assert encoded == value.milliseconds.to_bytes(4, "little") + b"{\x00"
     assert decode_value(definition, ObjectAddress(0x504B, 0), encoded, registry=registry) == value
+    assert value.protocol_date == date(1984, 5, 3)
 
 
 def test_floats_are_rejected_to_avoid_rounding_ambiguity(registry: Registry) -> None:

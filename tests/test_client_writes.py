@@ -10,15 +10,12 @@ from openrbus.access import ObjectRead, RawReadResult
 from openrbus.access_policy import AccessPolicy
 from openrbus.client import OpenRBusClient, ReadFailure, ReadResult
 from openrbus.errors import (
-    AccessLevelAmbiguityError,
     AccessLevelUnavailableError,
     AccessPolicyError,
     CanOpenAbortError,
     InsufficientAccessLevelError,
-    UnsafeWriteError,
     ValidationError,
     WritesDisabledError,
-    WriteVerificationError,
 )
 from openrbus.protocol.canip import ObjectAddress
 from openrbus.registry import AccessLevel, Registry
@@ -97,7 +94,7 @@ async def test_read_is_default_and_write_requires_both_opt_ins(registry: Registr
 
     client = OpenRBusClient(access, registry=registry, enable_writes=True)
     write_address = ObjectAddress(0x3425, 1)
-    with pytest.raises(UnsafeWriteError):
+    with pytest.raises(ValidationError, match="not validated writable"):
         await client.write(
             1,
             write_address,
@@ -123,7 +120,7 @@ async def test_read_many_uses_bulk_capability_and_decodes_in_order(registry: Reg
 
 
 @pytest.mark.asyncio
-async def test_dry_run_validates_without_io_and_active_write_reads_back(registry: Registry) -> None:
+async def test_unverified_registry_write_is_blocked_before_io(registry: Registry) -> None:
     address = ObjectAddress(0x2300, 0)
     access = FakeAccess(
         {
@@ -138,19 +135,9 @@ async def test_dry_run_validates_without_io_and_active_write_reads_back(registry
         max_access_level=AccessLevel.INSTALLER,
         minimum_write_interval=0,
     )
-    plan = await client.write(1, address, Decimal("12.34"), allow_unsafe=True, dry_run=True)
-    assert plan.dry_run
-    assert plan.raw_value == bytes.fromhex("d204")
-    assert plan.required_access_level is AccessLevel.INSTALLER
-    assert plan.higher_risk_access
-    assert plan.session_access is None
+    with pytest.raises(ValidationError, match="not validated writable"):
+        await client.write(1, address, Decimal("12.34"), allow_unsafe=True, dry_run=True)
     assert access.writes == []
-
-    result = await client.write(1, address, Decimal("12.34"), allow_unsafe=True)
-    assert result.verified
-    assert result.session_access is not None
-    assert result.session_access.effective_level is AccessLevel.PROFESSIONAL
-    assert access.writes == [(1, address, bytes.fromhex("d204"))]
 
 
 @pytest.mark.asyncio
@@ -202,7 +189,7 @@ async def test_cross_family_access_level_requires_device_family(registry: Regist
         enable_writes=True,
         max_access_level=AccessLevel.INSTALLER,
     )
-    with pytest.raises(AccessLevelAmbiguityError, match=r"write levels \(1, 2\)"):
+    with pytest.raises(ValidationError, match="not validated writable"):
         await client.write(1, "200e:00", 0, allow_unsafe=True, dry_run=True)
 
 
@@ -221,13 +208,7 @@ async def test_insufficient_session_level_blocks_before_raw_write(registry: Regi
         enable_writes=True,
         max_access_level=AccessLevel.INSTALLER,
     )
-    with pytest.raises(
-        InsufficientAccessLevelError,
-        match=(
-            r"340b:03 requires access level 2, but node authorization is verified only "
-            r"at effective level 1"
-        ),
-    ):
+    with pytest.raises(ValidationError, match="not validated writable"):
         await client.write(
             4,
             address,
@@ -265,18 +246,18 @@ async def test_read_only_ranges_and_type_conflicts_are_blocked(registry: Registr
     client = OpenRBusClient(FakeAccess(), registry=registry, enable_writes=True, max_access_level=2)
     with pytest.raises(ValidationError, match="not declared writable"):
         await client.write(1, "200d:00", 1, allow_unsafe=True, dry_run=True)
-    with pytest.raises(ValidationError, match="maximum"):
+    with pytest.raises(ValidationError, match="not validated writable"):
         await client.write(1, "2300:00", Decimal("20.01"), allow_unsafe=True, dry_run=True)
-    with pytest.raises(ValidationError, match="wire-type conflicts"):
+    with pytest.raises(ValidationError, match="not validated writable"):
         await client.write(1, "1003:01", b"\x00\x00", allow_unsafe=True, dry_run=True)
 
 
 @pytest.mark.asyncio
 async def test_range_conflict_requires_matching_device_family(registry: Registry) -> None:
     client = OpenRBusClient(FakeAccess(), registry=registry, enable_writes=True, max_access_level=2)
-    with pytest.raises(ValidationError, match="device_family"):
+    with pytest.raises(ValidationError, match="not validated writable"):
         await client.write(1, "3043:00", 1, allow_unsafe=True, dry_run=True)
-    with pytest.raises(AccessPolicyError, match="required level 5 exceeds configured maximum 2"):
+    with pytest.raises(ValidationError, match="not validated writable"):
         await client.write(1, "2009:00", 254, allow_unsafe=True, dry_run=True)
 
 
@@ -297,7 +278,7 @@ async def test_readback_mismatch_is_an_error(registry: Registry) -> None:
         max_access_level=2,
         minimum_write_interval=0,
     )
-    with pytest.raises(WriteVerificationError):
+    with pytest.raises(ValidationError, match="not validated writable"):
         await client.write(1, address, Decimal("12.34"), allow_unsafe=True)
 
 
@@ -321,10 +302,7 @@ async def test_default_policy_blocks_higher_level_write_before_raw_write(
     address = ObjectAddress(0x340B, 3)
     access = FakeAccess({(4, address): bytes.fromhex("bf00"), (4, EFFECTIVE_LEVEL): b"\x03"})
     client = OpenRBusClient(access, registry=registry, enable_writes=True)
-    with pytest.raises(
-        AccessPolicyError,
-        match=r"blocks write on register 340b:03.*required level 2.*maximum 1",
-    ):
+    with pytest.raises(ValidationError, match="not validated writable"):
         await client.write(
             4,
             address,

@@ -108,7 +108,7 @@ def test_scb_array_subindexes_are_concrete_family_rows() -> None:
         cp733 = next(entry for entry in catalog if str(entry.address) == "346a:04")
         assert cp733.datatype == "ENUMERATION"
         assert cp733.storage == "UINT8"
-        assert cp733.writable is True
+        assert cp733.writable is False
         assert cp733.access_level_evidence["read"]["required_level"] == "professional"
         assert cp733.access_level_evidence["write"]["required_level"] == "professional"
         assert cp733.safety == "unverified"

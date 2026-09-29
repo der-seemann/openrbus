@@ -383,6 +383,13 @@ class OpenRBusClient:
             raise WritesDisabledError("writes require enable_writes=True")
         if not definition.access.writable_declared:
             raise ValidationError(f"register {address} is not declared writable")
+        # Manufacturer metadata alone does not establish that a concrete
+        # device supports a safe write. Require positive, complete evidence
+        # for the exact family before exposing this operation.
+        if definition.safety.write.value != "validated":
+            raise ValidationError(
+                f"register {address} is not validated writable; it remains read-only"
+            )
         if definition.evidence.type_conflict:
             raise ValidationError(
                 f"register {address} has unresolved device-specific wire-type conflicts"
@@ -417,9 +424,10 @@ class OpenRBusClient:
             and device_family is not None
             and row.family.casefold() == device_family.casefold()
         )
-        if matching_evidence and not any(row.writable_any is True for row in matching_evidence):
+        if not matching_evidence or not all(row.writable_all is True for row in matching_evidence):
             raise ValidationError(
-                f"register {address} is not writable in device family {device_family}"
+                f"register {address} lacks complete writable evidence in device family "
+                f"{device_family or 'unknown'}"
             )
 
         if definition.constraint is not None:

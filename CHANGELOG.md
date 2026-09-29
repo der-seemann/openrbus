@@ -3,6 +3,30 @@
 All notable changes to OpenRBus are documented here. Version numbers follow
 semantic versioning while the project remains in pre-1.0 development.
 
+## 0.4.1 — release candidate
+
+### Added
+
+- Calendar date access for CANopen `TIME_OF_DAY` values, without timezone
+  interpretation.
+
+### Changed
+
+- Catalogs expose write capability only when validated write safety and
+  complete, exact-family evidence support it.
+- Direct writes require the same validated safety and evidence checks.
+
+### Compatibility and safety
+
+- Python 3.11 or newer is required.
+- The 0.4 API is intended for the Home Assistant integration's current
+  compatibility range; downstream integrations should run their full test
+  matrix before upgrading.
+- No register is claimed safe to write solely because a codec or read-back
+  succeeds. See `DISCLAIMER.md` and `docs/writing.md`.
+
+This candidate remains unreleased pending coordinated release checks.
+
 ## 0.4.0 — unreleased
 
 ### Added
