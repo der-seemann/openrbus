@@ -63,7 +63,18 @@ api:
               id(openrbus_pairing_status).publish_state("invalid_passkey");
               return;
             }
-            if (id(openrbus_pair_state) != 0) {
+            // Recover stale terminal states only while disconnected. Never
+            // clear an armed pairing attempt or infer pairing success.
+            const bool terminal_state = id(openrbus_pair_state) == 4 ||
+                                        id(openrbus_pair_state) == 5;
+            if (!id(openrbus_pairing_armed) && terminal_state &&
+                !id(ehc16_ble_client).connected()) {
+              ESP_LOGW("openrbus_pairing",
+                       "Clearing stale terminal pairing state=%u while disconnected",
+                       static_cast<unsigned>(id(openrbus_pair_state)));
+              id(openrbus_pair_state) = 0;
+            }
+            if (id(openrbus_pair_state) != 0 || id(openrbus_pairing_armed)) {
               id(openrbus_pairing_status).publish_state("failed_connect");
               ESP_LOGW("openrbus_pairing", "Pairing request rejected while state machine is active");
               return;

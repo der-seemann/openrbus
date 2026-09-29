@@ -75,6 +75,12 @@ class Phase2TransportStaticChecks(unittest.TestCase):
             action.index("openrbus_pairing_armed) = true"), action.index("ehc16_ble_client).pair()")
         )
 
+    def test_pairing_can_recover_only_inactive_stale_terminal_state(self) -> None:
+        action = YAML[YAML.index("- action: openrbus_pair") :]
+        self.assertIn("const bool terminal_state", action)
+        self.assertIn("!id(openrbus_pairing_armed) && terminal_state", action)
+        self.assertIn("!id(ehc16_ble_client).connected()", action)
+
     def test_thin_rpc_fences_legacy_pairing_disconnect_loop(self) -> None:
         self.assertIn("id: openrbus_thin_rpc_active", YAML)
         self.assertIn("id(openrbus_thin_rpc_active) = true;", YAML)
