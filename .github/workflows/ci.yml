@@ -25,7 +25,7 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy src/openrbus
-      - run: pytest
+      - run: python -m pytest
       - run: python tools/check_publication.py
       - run: python -m build
       - run: python -m twine check --strict dist/*
