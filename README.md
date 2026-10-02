@@ -1,6 +1,6 @@
 # OpenRBus
 
-OpenRBus 0.4.1 is an experimental, vendor-independent Python protocol core for
+OpenRBus 0.4.2 is an experimental, vendor-independent Python protocol core for
 reading CANopen-style objects from compatible BDR Thermea heating systems. It
 provides validated BLE segmentation, CAN-IP object access, a normalized public
 register registry, and an asynchronous high-level client.
@@ -8,9 +8,9 @@ register registry, and an asynchronous high-level client.
 The project is alpha software. Read support has hardware evidence for the
 documented BLE/CAN-IP path. Writes remain deliberately conservative: every
 currently published writable definition is classified as unverified, disabled
-by default, and requires an explicit unsafe opt-in. Do not use writes on a
-production heating system unless you understand and can recover from the
-possible effects.
+by the Core safety gate, and rejected before transport I/O even when write
+opt-ins are supplied. Do not use writes on a production heating system unless
+you understand and can recover from the possible effects.
 
 ## Scope and boundaries
 
@@ -46,7 +46,7 @@ For a released version, install the pinned package instead of an editable
 checkout:
 
 ```console
-python -m pip install 'openrbus[ble]==0.4.1'
+python -m pip install 'openrbus[ble]==0.4.2'
 ```
 
 ## Reading an object
@@ -117,11 +117,17 @@ Level-2/3 reads and all writes are blocked unless independently enabled. See
 [`docs/access-policy.md`](docs/access-policy.md) for direct, file, and explicit
 environment-variable configuration.
 
-Writes have five independent gate groups:
+The current registry has no hardware-validated writable definition, so the
+examples below cannot pass against the current published registry. A future
+definition must first be classified `validated` and satisfy the gates below;
+an unsafe opt-in cannot replace that primary safety decision.
+
+Writes have these independent gate groups:
 
 1. The client's access policy permits the register's declared level.
 2. Construct `OpenRBusClient` with `enable_writes=True`.
-3. Pass `allow_unsafe=True` for definitions that are not hardware-validated.
+3. Do not treat `allow_unsafe=True` as evidence or a bypass for an unverified
+   definition.
 4. For registers with device evidence, satisfy the declared access level. An
    active write verifies the authoritative effective level from `4002:00`.
 5. Pass a value satisfying the registry type, range, precision, family, and

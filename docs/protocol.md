@@ -67,6 +67,19 @@ checks assigned subindexes. Capability discovery reads the hardware-validated
 `5826` directory. Capability flag bits are preserved as raw values because
 their datatype and access semantics are not established.
 
+OBD 1.47 also defines two bounded controller-side arrays: `3096:00`
+(`FunctionGroupDiscovered`, 6 bytes per item, at most 70) and `3097:00`
+(`ZoneDiscovered`, 51 bytes per item, at most 12). Core exposes an optional
+read-only `discover_function_group_records()` API that reads both arrays on
+the master node and rejects malformed or partial snapshots. The records keep
+their raw numeric `lineId`, `nodeId`, function-group id/type, connection side,
+and zone subindex. The matching fields in both OBD structures permit an exact
+node/group/slot join. This behavior is source-derived; no runtime capture has
+yet validated that these arrays are readable on every supported appliance or
+that all runtime values follow the OBD profile-number convention. Callers must
+treat unsupported/malformed arrays as unavailable optional metadata and must
+not guess from a partial result.
+
 Identity reads are bounded. Serial-number collection is opt-in because it is
 installation-identifying data.
 

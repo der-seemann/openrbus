@@ -3,6 +3,22 @@
 All notable changes to OpenRBus are documented here. Version numbers follow
 semantic versioning while the project remains in pre-1.0 development.
 
+## 0.4.2 — release candidate
+
+### Added and changed
+
+- Machine-readable per-register comparison of OBD declarations, normalized
+  IAE facts, and local manufacturer-configuration metadata is maintained as a
+  development audit; metadata alone does not authorize writes.
+- HA write classification remains fail-closed unless complete, exact-family
+  write evidence is present. No register is currently enabled for writing.
+
+### Compatibility and safety
+
+- Python 3.11 or newer is required.
+- No register is claimed safe to write solely because a codec or read-back
+  succeeds. See `DISCLAIMER.md` and `docs/writing.md`.
+
 ## 0.4.1 — release candidate
 
 ### Added

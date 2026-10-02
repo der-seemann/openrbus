@@ -2,8 +2,9 @@
 
 Write safety and device access level are independent dimensions:
 
-- `validated` / `unverified` / `read_only` describes confidence in writing the
-  object. `allow_unsafe=True` is required only for `unverified` definitions.
+- `validated` / `unverified` describes whether the Core permits writing the
+  object. `read_only` describes a global dictionary declaration that is not
+  writable. `allow_unsafe=True` does not override an `unverified` classification.
 - `required_access_level` describes the device role required by static family
   evidence. It does not make an otherwise unsafe write safe.
 - `AccessPolicy.max_access_level` is the caller-selected ceiling for both reads
@@ -15,9 +16,10 @@ sources.
 
 No published register is currently classified as hardware-validated for safe
 writing. Definitions with declared write access are therefore still marked
-`unverified`; all others are read-only. The `validated` classification exists
-so a future, independently reviewed user-level register can use the normal
-`enable_writes=True` path without an unrelated unsafe opt-in.
+`unverified`; the client rejects them before transport I/O even when both
+write opt-ins are supplied. All other definitions are read-only. The
+`validated` classification exists so a future, independently reviewed
+register can use the normal `enable_writes=True` path.
 
 ## Device access levels
 
@@ -140,7 +142,8 @@ fallback to a bundled/default secret.
 1. The client's access policy permits the register's required level.
 2. The client was constructed with `enable_writes=True`.
 3. The register is globally declared writable.
-4. `allow_unsafe=True` is provided if the definition is `unverified`.
+4. The definition is classified `validated`; `allow_unsafe=True` does not
+   replace this requirement.
 5. No unresolved wire-type conflict exists.
 6. Supplied device-family evidence does not mark the register non-writable.
 7. The required write level is unambiguous for the supplied family.

@@ -54,6 +54,14 @@ from .errors import (
     WritesDisabledError,
     WriteVerificationError,
 )
+from .function_groups import (
+    FunctionGroupDiscovered,
+    FunctionGroupDiscovery,
+    FunctionGroupKey,
+    ZoneDiscovered,
+    discover_function_group_records,
+    filter_member_addresses,
+)
 from .inventory import (
     DeviceInventory,
     DiscoveryStatus,
@@ -100,6 +108,9 @@ __all__ = [
     "DeviceIdentity",
     "DeviceInventory",
     "DiscoveryStatus",
+    "FunctionGroupDiscovered",
+    "FunctionGroupDiscovery",
+    "FunctionGroupKey",
     "GatewayAuthorizationResult",
     "InsufficientAccessLevelError",
     "NodeAuthorizationError",
@@ -135,12 +146,15 @@ __all__ = [
     "WriteSafety",
     "WriteVerificationError",
     "WritesDisabledError",
+    "ZoneDiscovered",
     "assigned_nodes",
     "catalog_for_node",
     "classify_abort",
     "compute_authentication_response",
     "discover_capabilities",
     "discover_devices",
+    "discover_function_group_records",
+    "filter_member_addresses",
     "identify_node",
     "resolve_device_identity",
 ]

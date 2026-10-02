@@ -114,9 +114,10 @@ class OpenRBusClient:
     """Registry-driven asynchronous client.
 
     The local access policy defaults to known level-1 reads. Writing requires
-    constructor-level ``enable_writes=True``. Every currently published
-    writable definition additionally requires call-level ``allow_unsafe=True``;
-    independently hardware-validated definitions can omit that second opt-in.
+    constructor-level ``enable_writes=True``. A definition must also be
+    classified ``validated`` for its write safety before any access check or
+    transport I/O. ``allow_unsafe`` is not a bypass for unverified definitions.
+    No current definition is validated, so no current write reaches transport.
     """
 
     def __init__(

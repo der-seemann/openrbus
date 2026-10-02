@@ -109,3 +109,13 @@ silently publishing longer descriptive text.
 reads no source database or vendor input and produces deterministic compact
 JSON or a C/C++ header. Both formats now retain enum/structure references,
 enum value labels for the selected locale, and packed-field names.
+
+`tools/audit_rw_evidence.py` is a separate local audit tool. Given the
+normalized registry and recovered mapping database, it emits a per-register
+JSON comparison for OBD declared access, IAE family/subindex write metadata,
+manufacturer-config SDO access facts, and the current OpenRBus write gate.
+The mapping database is an explicit local input and is not part of this
+repository or package. The report omits source paths, raw source attributes,
+runtime values, and device identifiers. It records RXDX as unavailable when
+the recovered database has no such source; that status does not mean a
+register was absent from every RXDX source.
