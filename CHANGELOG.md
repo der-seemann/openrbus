@@ -3,15 +3,22 @@
 All notable changes to OpenRBus are documented here. Version numbers follow
 semantic versioning while the project remains in pre-1.0 development.
 
-## 0.4.2 — release candidate
+## 0.4.3 — release
+
+### Added and changed
+
+- Editable IAE/RXDX parameters with compatible bounded zone slots are exposed as regular controls when write access is enabled. Registers without an explicit read-only declaration can be exposed separately through a default-off experimental option. Read-only declarations, unresolved wire-type conflicts, access-level ambiguity, and invalid values remain blocked.
+- The Core registry and write client enforce the same regular and experimental write classification; HA requires its write and experimental opt-ins.
+
+## 0.4.2 — release
 
 ### Added and changed
 
 - Machine-readable per-register comparison of OBD declarations, normalized
   IAE facts, and local manufacturer-configuration metadata is maintained as a
   development audit; metadata alone does not authorize writes.
-- HA write classification remains fail-closed unless complete, exact-family
-  write evidence is present. No register is currently enabled for writing.
+- The published 0.4.2 catalog keeps all register writes fail-closed pending
+  the candidate classification and control flow introduced in 0.4.3.
 
 ### Compatibility and safety
 

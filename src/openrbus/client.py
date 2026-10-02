@@ -387,9 +387,12 @@ class OpenRBusClient:
         # Manufacturer metadata alone does not establish that a concrete
         # device supports a safe write. Require positive, complete evidence
         # for the exact family before exposing this operation.
-        if definition.safety.write.value != "validated":
+        write_safety = definition.write_safety_for(address, device_family).value
+        if write_safety not in {"validated", "source_supported"} and not (
+            write_safety == "unverified" and allow_unsafe
+        ):
             raise ValidationError(
-                f"register {address} is not validated writable; it remains read-only"
+                f"register {address} is not validated writable; experimental writes are disabled"
             )
         if definition.evidence.type_conflict:
             raise ValidationError(
@@ -413,7 +416,11 @@ class OpenRBusClient:
         assert required_access_level is not None
         assert required_access_level == required_for_policy
 
-        if definition.safety.requires_unsafe_opt_in and not allow_unsafe:
+        if (
+            definition.safety.requires_unsafe_opt_in
+            and write_safety == "unverified"
+            and not allow_unsafe
+        ):
             raise UnsafeWriteError(
                 f"register {address} is unverified and requires allow_unsafe=True"
             )
@@ -425,7 +432,23 @@ class OpenRBusClient:
             and device_family is not None
             and row.family.casefold() == device_family.casefold()
         )
-        if not matching_evidence or not all(row.writable_all is True for row in matching_evidence):
+        # Experimental writes are explicitly acknowledged by the caller and
+        # are defined by the manufacturer registry's IsReadOnly=False flag.
+        # They still pass the same access-level, datatype, range and enum
+        # checks below. Ordinary source-supported writes require exact-family
+        # positive IAE evidence.
+        experimental = allow_unsafe and write_safety == "unverified"
+        source_supported = write_safety == "source_supported"
+        if not experimental and not matching_evidence:
+            raise ValidationError(
+                f"register {address} lacks exact evidence in device family "
+                f"{device_family or 'unknown'}"
+            )
+        if (
+            not experimental
+            and not source_supported
+            and not all(row.writable_all is True for row in matching_evidence)
+        ):
             raise ValidationError(
                 f"register {address} lacks complete writable evidence in device family "
                 f"{device_family or 'unknown'}"

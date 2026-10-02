@@ -2,9 +2,11 @@
 
 Write safety and device access level are independent dimensions:
 
-- `validated` / `unverified` describes whether the Core permits writing the
-  object. `read_only` describes a global dictionary declaration that is not
-  writable. `allow_unsafe=True` does not override an `unverified` classification.
+- `validated` identifies the one reversible hardware-tested family/address
+  pair. `source_supported` identifies exact-family writable declarations in
+  IAE/RXDX evidence. `unverified` identifies writable declarations that need
+  the separate experimental opt-in. `read_only` is an explicit read-only
+  declaration.
 - `required_access_level` describes the device role required by static family
   evidence. It does not make an otherwise unsafe write safe.
 - `AccessPolicy.max_access_level` is the caller-selected ceiling for both reads
@@ -14,12 +16,19 @@ The access policy defaults to level 1 and writes default to disabled. See
 [`access-policy.md`](access-policy.md) for the full model and configuration
 sources.
 
-No published register is currently classified as hardware-validated for safe
-writing. Definitions with declared write access are therefore still marked
-`unverified`; the client rejects them before transport I/O even when both
-write opt-ins are supplied. All other definitions are read-only. The
-`validated` classification exists so a future, independently reviewed
-register can use the normal `enable_writes=True` path.
+The one concrete hardware-validated write is SCB-10 `346a:04` (CP733, one
+element of CP730 `parZoneHeatUpSpeed`, “HK Aufheizgrad.”). IAE/RXDX writable
+parameter declarations also enable regular `source_supported` controls for
+the exact family and address, including compatible bounded array zones. The
+current registry records 843 exact source-supported family/address pairs and
+one hardware-validated pair. Experimental controls require both write
+enablement and the separate experimental option; explicit read-only rows,
+type conflicts, access-level checks, and value constraints still apply.
+
+The hardware evidence validates the reversible object write/read-back/restore
+path; it does not establish that the setting is appropriate for every
+installation. Source-supported and experimental classifications describe
+declared capability, not a safety guarantee for a particular installation.
 
 ## Device access levels
 
@@ -142,8 +151,8 @@ fallback to a bundled/default secret.
 1. The client's access policy permits the register's required level.
 2. The client was constructed with `enable_writes=True`.
 3. The register is globally declared writable.
-4. The definition is classified `validated`; `allow_unsafe=True` does not
-   replace this requirement.
+4. The definition is `validated` or `source_supported`, or the caller has
+  explicitly enabled experimental writes for an `unverified` declaration.
 5. No unresolved wire-type conflict exists.
 6. Supplied device-family evidence does not mark the register non-writable.
 7. The required write level is unambiguous for the supplied family.

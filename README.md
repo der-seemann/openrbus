@@ -1,15 +1,17 @@
 # OpenRBus
 
-OpenRBus 0.4.2 is an experimental, vendor-independent Python protocol core for
+OpenRBus 0.4.3 is an experimental, vendor-independent Python protocol core for
 reading CANopen-style objects from compatible BDR Thermea heating systems. It
 provides validated BLE segmentation, CAN-IP object access, a normalized public
 register registry, and an asynchronous high-level client.
 
 The project is alpha software. Read support has hardware evidence for the
-documented BLE/CAN-IP path. Writes remain deliberately conservative: every
-currently published writable definition is classified as unverified, disabled
-by the Core safety gate, and rejected before transport I/O even when write
-opt-ins are supplied. Do not use writes on a production heating system unless
+documented BLE/CAN-IP path. Regular writes are exposed for exact-family
+parameters declared writable by IAE/RXDX evidence, and SCB-10 CP733
+`346a:04` has additional reversible hardware validation. Other writable
+declarations require the separate experimental-write option. Active writes
+require explicit write enablement, an allowed access level, and a verified
+effective node role. Do not use writes on a production heating system unless
 you understand and can recover from the possible effects.
 
 ## Scope and boundaries
@@ -46,7 +48,7 @@ For a released version, install the pinned package instead of an editable
 checkout:
 
 ```console
-python -m pip install 'openrbus[ble]==0.4.2'
+python -m pip install 'openrbus[ble]==0.4.3'
 ```
 
 ## Reading an object
@@ -117,10 +119,10 @@ Level-2/3 reads and all writes are blocked unless independently enabled. See
 [`docs/access-policy.md`](docs/access-policy.md) for direct, file, and explicit
 environment-variable configuration.
 
-The current registry has no hardware-validated writable definition, so the
-examples below cannot pass against the current published registry. A future
-definition must first be classified `validated` and satisfy the gates below;
-an unsafe opt-in cannot replace that primary safety decision.
+SCB-10 `346a:04` has hardware-validated reversible write, read-back, and
+restore evidence. Exact IAE/RXDX writable declarations can also be used as
+regular writes for matching families. Other writable declarations require
+both write enablement and the experimental-write opt-in.
 
 Writes have these independent gate groups:
 

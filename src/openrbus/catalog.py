@@ -28,6 +28,7 @@ class RegisterCatalogEntry:
     unit: str | None
     readable: bool
     writable: bool
+    write_declared: bool
     access_level_evidence: dict[str, object]
     safety: str
     provenance: tuple[str, ...]
@@ -52,6 +53,7 @@ class RegisterCatalogEntry:
             "unit": self.unit,
             "readable": self.readable,
             "writable": self.writable,
+            "write_declared": self.write_declared,
             "access_level_evidence": self.access_level_evidence,
             "safety": self.safety,
             "provenance": list(self.provenance),
@@ -59,7 +61,11 @@ class RegisterCatalogEntry:
 
 
 def _entry(
-    node: int, definition: RegisterDefinition, family: str | None, address: ObjectAddress
+    node: int,
+    definition: RegisterDefinition,
+    family: str | None,
+    address: ObjectAddress,
+    experimental_writes: bool = False,
 ) -> RegisterCatalogEntry:
     write_requirement = definition.access_requirement(
         address, AccessOperation.WRITE, device_family=family
@@ -73,10 +79,27 @@ def _entry(
     )
     evidenced_writable = (
         definition.access.writable_declared
-        and definition.safety.write.value == "validated"
+        and definition.write_safety_for(address, family).value in {"validated", "source_supported"}
         and write_requirement.is_known
-        and bool(matching_write_rows)
-        and all(row.writable_all is True for row in matching_write_rows)
+        and (
+            (
+                definition.write_safety_for(address, family).value == "source_supported"
+                and (
+                    bool(matching_write_rows)
+                    or definition._array_slot_has_source_support(address, family)
+                )
+            )
+            or (
+                bool(matching_write_rows)
+                and all(row.writable_all is True for row in matching_write_rows)
+            )
+        )
+    )
+    experimental_writable = (
+        experimental_writes
+        and definition.access.writable_declared
+        and definition.write_safety_for(address, family).value == "unverified"
+        and not definition.evidence.type_conflict
     )
 
     def evidence(operation: AccessOperation) -> dict[str, object]:
@@ -103,12 +126,13 @@ def _entry(
         scale=definition.wire.gain,
         unit=definition.wire.unit,
         readable=definition.access.readable_declared,
-        writable=evidenced_writable,
+        writable=evidenced_writable or experimental_writable,
+        write_declared=definition.access.writable_declared,
         access_level_evidence={
             "read": evidence(AccessOperation.READ),
             "write": evidence(AccessOperation.WRITE),
         },
-        safety=definition.safety.write.value,
+        safety=definition.write_safety_for(address, family).value,
         provenance=tuple(sorted(set(definition.evidence.device_families)))
         or ((family,) if family else ()),
     )
@@ -118,6 +142,7 @@ def catalog_for_node(
     node: DeviceInventory | DeviceIdentity | int,
     registry: Registry | None = None,
     capabilities: Iterable[CapabilityReference | ObjectAddress] | None = None,
+    experimental_writes: bool = False,
     *,
     max_access_level: int | None = None,
 ) -> tuple[RegisterCatalogEntry, ...]:
@@ -179,6 +204,19 @@ def catalog_for_node(
             # belongs to another family.
             has_family_evidence = bool(family_rows)
             candidate_addresses = (definition.address, *sorted(family_rows))
+            if definition.wire.is_array and definition.wire.max_items is not None:
+                # Static source catalogs often contain a family definition
+                # for one or more zones while the local installation has
+                # fewer active slots. Project only the canonical array's
+                # bounded element range; RegisterDefinition inherits access
+                # and write support only when sibling source rows agree.
+                candidate_addresses = (
+                    *candidate_addresses,
+                    *(
+                        ObjectAddress(definition.address.index, subindex)
+                        for subindex in range(1, definition.wire.max_items + 1)
+                    ),
+                )
             for address in candidate_addresses:
                 requirement = definition.access_requirement(
                     address, AccessOperation.READ, device_family=family
@@ -205,7 +243,8 @@ def catalog_for_node(
             definitions.append((address, found_definition))
             seen.add(address)
     return tuple(
-        _entry(node_id, definition, family, address) for address, definition in definitions
+        _entry(node_id, definition, family, address, experimental_writes)
+        for address, definition in definitions
     )
 
 

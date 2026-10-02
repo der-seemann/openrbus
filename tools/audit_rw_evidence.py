@@ -240,7 +240,7 @@ def _iae_inventory(directory: Path | None, normalized_hashes: set[str]) -> dict[
 def _rxdx_cache_evidence(
     directory: Path | None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
-    """Read extracted PCST cache XML as presence/type/UI-access metadata only."""
+    """Read PCST cache parameter declarations and their mapped UI metadata."""
     if directory is None:
         return {}, {
             "status": "not_scanned",
@@ -260,6 +260,8 @@ def _rxdx_cache_evidence(
             "wire_types": set(),
             "access_flags": set(),
             "config_readonly": Counter(),
+            "config_types": set(),
+            "config_function_mapped": False,
         }
     )
     config_inventory: Counter[str] = Counter()
@@ -358,12 +360,25 @@ def _rxdx_cache_evidence(
                         config_inventory["readonly_unmapped"] += 1
                         continue
                     result[address]["config_readonly"][normalized_readonly] += 1
+                    # The RXDX <config> is an actual parameter editor
+                    # declaration only when it has both a typed UI control
+                    # and a byte-mapped function. Keep these facts separate
+                    # from the SDO's presence/type and from `readonly`.
+                    config_type = config.attrib.get("type", "").strip().lower()
+                    if config_type:
+                        result[address]["config_types"].add(config_type)
+                    result[address]["config_function_mapped"] = True
                     config_inventory["readonly_mapped"] += 1
     normalized = {
         address: {
             "status": "observed_in_ingested_cache_subset",
             "classification": (
-                "presence_type_and_configuration_readonly_metadata"
+                "writable_parameter_candidate"
+                if item["config_function_mapped"]
+                and item["config_types"] & {"field", "bit", "select"}
+                and item["config_readonly"].get("false")
+                and not item["config_readonly"].get("true")
+                else "presence_type_and_configuration_readonly_metadata"
                 if item["config_readonly"]
                 else "presence_and_wire_type_only"
             ),
@@ -372,6 +387,14 @@ def _rxdx_cache_evidence(
             "wire_types": sorted(item["wire_types"]),
             "access_metadata_fields": sorted(item["access_flags"]),
             "configuration_readonly_values": sorted(item["config_readonly"]),
+            "configuration_parameter_types": sorted(item["config_types"]),
+            "configuration_function_mapped": item["config_function_mapped"],
+            "parameter_declaration_candidate": bool(
+                item["config_function_mapped"]
+                and item["config_types"] & {"field", "bit", "select"}
+                and item["config_readonly"].get("false")
+                and not item["config_readonly"].get("true")
+            ),
             "configuration_readonly_occurrences": sum(item["config_readonly"].values()),
             "configuration_readonly_status": (
                 "mixed"
@@ -384,7 +407,12 @@ def _rxdx_cache_evidence(
             ),
             "configuration_readonly_source_scope": "pcst_configuration_ui_metadata",
             "writability": "unassessed",
-            "can_promote_write": False,
+            "can_promote_write": bool(
+                item["config_function_mapped"]
+                and item["config_types"] & {"field", "bit", "select"}
+                and item["config_readonly"].get("false")
+                and not item["config_readonly"].get("true")
+            ),
         }
         for address, item in result.items()
     }
@@ -448,6 +476,17 @@ def build_report(
     for register in sorted(registry["registers"], key=lambda row: row["address"]):
         address = register["address"]
         evidence = iae.get(address, [])
+        rxdx_row = rxdx_cache_evidence.get(address)
+        if rxdx_row is not None:
+            explicit_iae_readonly = any(item.get("writable") == 0 for item in evidence)
+            explicit_iae_readonly_conflict = (
+                explicit_iae_readonly and rxdx_row["parameter_declaration_candidate"]
+            )
+            rxdx_row["explicit_iae_readonly_conflict"] = explicit_iae_readonly_conflict
+            if explicit_iae_readonly_conflict:
+                rxdx_row["parameter_declaration_candidate"] = False
+                rxdx_row["can_promote_write"] = False
+                rxdx_row["classification"] = "explicit_iae_readonly_conflict"
         obd_row = obd.get(address)
         declared_writable = bool(register["access"]["write"])
         family_rows = register["evidence"].get("devices", [])
@@ -475,7 +514,9 @@ def build_report(
                     "rows": evidence,
                 },
                 "manufacturer_config": config.get(address),
-                "rxdx": rxdx_cache_evidence.get(
+                "rxdx": rxdx_row
+                if rxdx_row is not None
+                else rxdx_cache_evidence.get(
                     address,
                     {
                         "status": "not_observed_in_ingested_cache_subset",
@@ -483,6 +524,10 @@ def build_report(
                         "device_families": [],
                         "wire_types": [],
                         "configuration_readonly_values": [],
+                        "configuration_parameter_types": [],
+                        "configuration_function_mapped": False,
+                        "parameter_declaration_candidate": False,
+                        "explicit_iae_readonly_conflict": False,
                         "configuration_readonly_occurrences": 0,
                         "configuration_readonly_status": "not_observed",
                         "configuration_readonly_source_scope": "pcst_configuration_ui_metadata",
@@ -517,9 +562,10 @@ def build_report(
             ),
             "manufacturer_config": "recovered normalized manufacturer config SDO evidence",
             "rxdx": (
-                "offline-decoded PCST cache XML contributes SDO address/type and mapped "
-                "configuration readonly UI metadata; SDO access flags and write-level "
-                "fields are absent, and no RXDX metadata authorizes writes"
+                "offline-decoded PCST cache XML contributes exact family/address SDO types "
+                "and byte-mapped typed config/function declarations; readonly=false with a "
+                "mapped field/bit/select is a writable-parameter candidate, readonly=true "
+                "or mixed declarations veto it; access-level authorization remains required"
             ),
             "source_database_kinds": source_kinds,
             "iae_local_inventory": _iae_inventory(iae_directory, iae_source_hashes),

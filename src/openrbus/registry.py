@@ -52,6 +52,7 @@ class WriteSafety(StrEnum):
 
     READ_ONLY = "read_only"
     UNVERIFIED = "unverified"
+    SOURCE_SUPPORTED = "source_supported"
     VALIDATED = "validated"
 
 
@@ -173,11 +174,15 @@ class SafetyDefinition:
 
     write: WriteSafety
     requires_unsafe_opt_in: bool
+    validated_devices: tuple[tuple[str, RegisterAddress], ...] = ()
+    source_supported_devices: tuple[tuple[str, RegisterAddress], ...] = ()
 
     def __post_init__(self) -> None:
         expected = self.write is WriteSafety.UNVERIFIED
         if self.requires_unsafe_opt_in is not expected:
             raise RegistryError("unsafe opt-in must match the unverified write classification")
+        if len(set(self.source_supported_devices)) != len(self.source_supported_devices):
+            raise RegistryError("source-supported write evidence must be unique")
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,11 +297,90 @@ class RegisterDefinition:
             raise RegistryError(f"register {self.address} lacks a DE/EN short name")
         if self.access.writable_declared == (self.safety.write is WriteSafety.READ_ONLY):
             raise RegistryError("write safety classification conflicts with declared access")
+        if len(set(self.safety.validated_devices)) != len(self.safety.validated_devices):
+            raise RegistryError("validated device write evidence must be unique")
+        for family, address in self.safety.validated_devices:
+            if self.safety.write is not WriteSafety.UNVERIFIED:
+                raise RegistryError("address-specific validation requires global unverified safety")
+            if not any(
+                row.family.casefold() == family.casefold()
+                and row.address == address
+                and row.writable_all is True
+                for row in self.evidence.devices
+            ):
+                raise RegistryError(
+                    f"validated write {family} {address} lacks positive exact device evidence"
+                )
+        for family, address in self.safety.source_supported_devices:
+            if self.safety.write is not WriteSafety.UNVERIFIED:
+                raise RegistryError("source-supported rows require global unverified safety")
+            if not any(
+                row.family.casefold() == family.casefold()
+                and row.address == address
+                and row.write_level_min is not None
+                and row.write_level_min == row.write_level_max
+                for row in self.evidence.devices
+            ):
+                raise RegistryError(
+                    f"source-supported write {family} {address} lacks exact write-level evidence"
+                )
 
     def name(self, locale: str = "en") -> str:
         """Return the localized short name."""
 
         return self.names.for_locale(locale)
+
+    def write_safety_for(self, address: RegisterAddress, device_family: str | None) -> WriteSafety:
+        """Resolve safety for a concrete address without widening array evidence."""
+        if self.safety.write is WriteSafety.VALIDATED:
+            return WriteSafety.VALIDATED
+        if device_family is not None and any(
+            row_address == address and family.casefold() == device_family.casefold()
+            for family, row_address in self.safety.validated_devices
+        ):
+            return WriteSafety.VALIDATED
+        if device_family is not None and any(
+            row_address == address and family.casefold() == device_family.casefold()
+            for family, row_address in self.safety.source_supported_devices
+        ):
+            return WriteSafety.SOURCE_SUPPORTED
+        if self._array_slot_has_source_support(address, device_family):
+            return WriteSafety.SOURCE_SUPPORTED
+        return self.safety.write
+
+    def _array_slot_has_source_support(
+        self, address: RegisterAddress, device_family: str | None
+    ) -> bool:
+        """Inherit uniform source RW facts to an unobserved bounded array slot."""
+        if (
+            not device_family
+            or not self.wire.is_array
+            or address.index != self.address.index
+            or address.subindex <= 0
+            or address.subindex > (self.wire.max_items or 0)
+        ):
+            return False
+        family = device_family.casefold()
+        siblings = tuple(
+            row
+            for row in self.evidence.devices
+            if row.family.casefold() == family
+            and row.address.index == address.index
+            and row.address.subindex > 0
+            and row.address != address
+        )
+        if not siblings or any(row.writable_all is False for row in siblings):
+            return False
+        supported = {
+            peer_address
+            for peer_family, peer_address in self.safety.source_supported_devices
+            if peer_family.casefold() == family
+            and peer_address.index == address.index
+            and peer_address.subindex > 0
+        }
+        peers = tuple(row for row in siblings if row.address in supported)
+        levels = {row.required_write_level for row in peers}
+        return bool(peers) and None not in levels and len(levels) == 1
 
     def access_requirement(
         self,
@@ -316,6 +400,19 @@ class RegisterDefinition:
         rows = tuple(row for row in self.evidence.devices if row.address == address)
         if device_family is not None:
             rows = tuple(row for row in rows if row.family.casefold() == device_family.casefold())
+            if not rows and self._array_slot_has_source_support(address, device_family):
+                source_peers = {
+                    peer_address
+                    for peer_family, peer_address in self.safety.source_supported_devices
+                    if peer_family.casefold() == device_family.casefold()
+                    and peer_address.index == address.index
+                }
+                rows = tuple(
+                    row
+                    for row in self.evidence.devices
+                    if row.family.casefold() == device_family.casefold()
+                    and row.address in source_peers
+                )
         levels: list[AccessLevel] = []
         complete = bool(rows)
         for row in rows:
@@ -1018,6 +1115,53 @@ def _parse_register(raw_value: Any, offset: int) -> RegisterDefinition:
             write=_write_safety(safety.get("write"), f"{path}.safety.write"),
             requires_unsafe_opt_in=_expect_bool(
                 safety.get("requires_unsafe"), f"{path}.safety.requires_unsafe"
+            ),
+            validated_devices=tuple(
+                (
+                    _expect_str(
+                        _expect_mapping(row, f"{path}.safety.validated_devices[{index}]").get(
+                            "family"
+                        ),
+                        f"{path}.safety.validated_devices[{index}].family",
+                    ),
+                    _parse_address(
+                        _expect_str(
+                            _expect_mapping(row, f"{path}.safety.validated_devices[{index}]").get(
+                                "address"
+                            ),
+                            f"{path}.safety.validated_devices[{index}].address",
+                        )
+                    ),
+                )
+                for index, row in enumerate(
+                    _expect_list(
+                        safety.get("validated_devices", []), f"{path}.safety.validated_devices"
+                    )
+                )
+            ),
+            source_supported_devices=tuple(
+                (
+                    _expect_str(
+                        _expect_mapping(
+                            row, f"{path}.safety.source_supported_devices[{index}]"
+                        ).get("family"),
+                        f"{path}.safety.source_supported_devices[{index}].family",
+                    ),
+                    _parse_address(
+                        _expect_str(
+                            _expect_mapping(
+                                row, f"{path}.safety.source_supported_devices[{index}]"
+                            ).get("address"),
+                            f"{path}.safety.source_supported_devices[{index}].address",
+                        )
+                    ),
+                )
+                for index, row in enumerate(
+                    _expect_list(
+                        safety.get("source_supported_devices", []),
+                        f"{path}.safety.source_supported_devices",
+                    )
+                )
             ),
         ),
         evidence=EvidenceDefinition(

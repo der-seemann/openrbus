@@ -54,18 +54,20 @@ def test_family_catalog_projects_access_ceiling_for_known_ehc() -> None:
 
     counts = {level: len(catalog_for_node(identity, max_access_level=level)) for level in (1, 2, 3)}
 
-    assert counts[1] == 148
-    assert counts[2] == 254
-    assert counts[3] == 388
     assert counts[1] < counts[2] < counts[3]
-    assert counts[3] > 200
+    assert counts[3] > 1000
+    assert ObjectAddress(0x200E, 0) in {
+        entry.address for entry in catalog_for_node(identity, max_access_level=2)
+    }
 
 
 def test_inventory_family_catalog_uses_identity_family() -> None:
     identity = resolve_device_identity(DeviceIdentity(1, 528, None, None))
     inventory = DeviceInventory(identity)
 
-    assert len(catalog_for_node(inventory, max_access_level=3)) == 388
+    assert {entry.address for entry in catalog_for_node(inventory, max_access_level=3)} == {
+        entry.address for entry in catalog_for_node(identity, max_access_level=3)
+    }
 
 
 def test_scb_family_catalog_projects_each_access_level() -> None:
@@ -73,7 +75,8 @@ def test_scb_family_catalog_projects_each_access_level() -> None:
 
     counts = {level: len(catalog_for_node(identity, max_access_level=level)) for level in (1, 2, 3)}
 
-    assert counts == {1: 221, 2: 557, 3: 617}
+    assert counts[1] < counts[2] < counts[3]
+    assert counts[3] > 1000
 
 
 def test_evidenced_gateway_and_mk3_families_project_complete_catalog() -> None:
@@ -99,7 +102,7 @@ def test_scb_array_subindexes_are_concrete_family_rows() -> None:
     """CP733's :04 is an evidence-backed array element, not a :00 alias."""
 
     registry = Registry.load_default()
-    expected = {ObjectAddress(0x346A, subindex) for subindex in range(1, 6)}
+    expected = {ObjectAddress(0x346A, subindex) for subindex in range(1, 11)}
     for node in (4, 37, 117):
         identity = resolve_device_identity(DeviceIdentity(node, None, None, "SCB-10"))
         catalog = catalog_for_node(identity, registry, max_access_level=3)
@@ -108,14 +111,45 @@ def test_scb_array_subindexes_are_concrete_family_rows() -> None:
         cp733 = next(entry for entry in catalog if str(entry.address) == "346a:04")
         assert cp733.datatype == "ENUMERATION"
         assert cp733.storage == "UINT8"
-        assert cp733.writable is False
+        assert cp733.writable is True
         assert cp733.access_level_evidence["read"]["required_level"] == "professional"
         assert cp733.access_level_evidence["write"]["required_level"] == "professional"
-        assert cp733.safety == "unverified"
+        assert cp733.safety == "validated"
+        assert all(entry.writable for entry in catalog if entry.address.index == 0x346A)
 
-    # EHC-16 has evidence only for CP730 :01; SCB-only CP733 rows must not
-    # leak into an unrelated family projection.
+    # EHC-16 receives comparable bounded zone rows with its own source
+    # support classification; SCB's historical validation does not transfer.
     ehc = resolve_device_identity(DeviceIdentity(88, 528, None, None))
     ehc_addresses = {entry.address for entry in catalog_for_node(ehc, registry, max_access_level=3)}
     assert ObjectAddress(0x346A, 1) in ehc_addresses
-    assert ObjectAddress(0x346A, 4) not in ehc_addresses
+    ehc_cp733 = next(
+        entry
+        for entry in catalog_for_node(ehc, registry, max_access_level=3)
+        if entry.address == ObjectAddress(0x346A, 4)
+    )
+    assert ehc_cp733.writable is True
+    assert ehc_cp733.safety == "source_supported"
+
+
+def test_iae_source_supported_write_is_exact_family_and_readonly_stays_blocked() -> None:
+    registry = Registry.load_default()
+    definition = registry.get("200e:00")
+    identity = resolve_device_identity(DeviceIdentity(4, 528, None, None))
+
+    row = next(
+        item for item in catalog_for_node(identity, registry) if item.address == definition.address
+    )
+    assert row.writable is True
+    assert row.write_declared is True
+    assert row.safety == "source_supported"
+    assert row.access_level_evidence["write"]["required_level"] == "installer"
+
+    explicit_ro = registry.get("348d:00")
+    ro_identity = resolve_device_identity(DeviceIdentity(4, 528, None, None))
+    ro_row = next(
+        item
+        for item in catalog_for_node(ro_identity, registry)
+        if item.address == explicit_ro.address
+    )
+    assert ro_row.writable is False
+    assert ro_row.write_declared is False

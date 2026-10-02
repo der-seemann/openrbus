@@ -23,8 +23,11 @@ firmware configuration may change availability, type, range, and access. Known
 profile-specific type and range conflicts remain explicit instead of being
 silently merged into the canonical definition.
 
-All declared-writable registers are currently classified `unverified` and
-require the separate unsafe-write opt-in. No live write validation is claimed.
+Writable declarations are classified per exact family/address using IAE/RXDX
+source evidence. The current registry has 843 source-supported family/address
+pairs and one hardware-validated pair: SCB-10 `346a:04` (CP733), with
+reversible write/read-back/restore validation. Other writable declarations
+remain experimental and require the separate opt-in at runtime.
 
 Publication boundary:
 

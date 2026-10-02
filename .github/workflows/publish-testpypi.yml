@@ -6,7 +6,7 @@ on:
       tag:
         description: Git tag to build and publish
         required: true
-        default: v0.4.2
+        default: v0.4.3
         type: string
 
 run-name: Publish ${{ inputs.tag }} to TestPyPI
