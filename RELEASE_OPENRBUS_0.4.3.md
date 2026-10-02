@@ -1,6 +1,6 @@
 # OpenRBus Core 0.4.3 release preflight
 
-Status: **FINAL TEST-HA READ-ONLY GATE PASSED; PUBLICATION IN PROGRESS.** This
+Status: **PUBLISHED AND VERIFIED.** This
 report records only the 0.4.3 release. See `RELEASE_OPENRBUS_0.4.2.md` for
 the completed 0.4.2 publication history.
 
@@ -32,11 +32,30 @@ was called during this read-only release validation. Software tests do not
 physically validate write behavior on a target installation. These local
 checks are complete; external exact-commit workflows remain pending.
 
-## Publication
+## Publication verification — 2026-10-02
 
-Publication proceeds only after the pushed exact commits pass their external
-CI and validation workflows. Core is published before HA so the pinned
-`openrbus==0.4.3` dependency is available from PyPI.
+- Core annotated tag `v0.4.3` resolves to
+  `d4bfcc02fe04bd410e669165822d882e562e249f`. Exact-SHA CI run
+  [37036004417](https://github.com/der-seemann/openrbus/actions/runs/37036004417)
+  passed across Python 3.11–3.13.
+- The PyPI trusted-publisher run
+  [37036322216](https://github.com/der-seemann/openrbus/actions/runs/37036322216)
+  succeeded. PyPI lists the wheel and sdist; downloaded hashes matched its
+  JSON metadata. A fresh standard-index installation reported 0.4.3,
+  exposed `write_declared`, and passed `pip check`.
+- Public Core GitHub Release:
+  https://github.com/der-seemann/openrbus/releases/tag/v0.4.3
+- HA annotated tag `v0.4.3` resolves to
+  `ee8a35b4263e34f0a152149f7780aea226394f47`; exact-SHA Tests run
+  [37036075913](https://github.com/der-seemann/ha-openrbus/actions/runs/37036075913)
+  and Validate run
+  [37036076299](https://github.com/der-seemann/ha-openrbus/actions/runs/37036076299)
+  passed. Validate includes HACS and Hassfest.
+- Public HA GitHub Release:
+  https://github.com/der-seemann/ha-openrbus/releases/tag/v0.4.3
+- Core became available as `openrbus==0.4.3` before the HA release. No
+  private evidence, local paths, credentials, or runtime exports were
+  published. No binary or firmware asset applies.
 ## Final exact-candidate gate update (2026-10-02 16:15 CEST)
 
 The follow-up Core fix exposes the base `write_declared` catalog fact independently of the active RW projection. A fresh 0.4.3 wheel and sdist were built from the current source (wheel SHA-256 `d88e6697141abfc1662445de68b4ee516068b37719b41e77c7fccd96595da714`; sdist SHA-256 `45a0da2c63e65c82bb416f7095da712a555278da4a640cf6d39da3e0d084b`). Core Ruff, formatting, strict mypy, compile, Twine, publication, and archive/privacy audits passed. HA's full suite passed: 286 tests against that fresh wheel.
