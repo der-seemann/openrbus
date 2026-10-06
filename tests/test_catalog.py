@@ -55,7 +55,9 @@ def test_family_catalog_projects_access_ceiling_for_known_ehc() -> None:
     counts = {level: len(catalog_for_node(identity, max_access_level=level)) for level in (1, 2, 3)}
 
     assert counts[1] < counts[2] < counts[3]
-    assert counts[3] > 1000
+    # Wire arrays with a 255-item bound are no longer expanded into
+    # speculative aliases; evidenced scalars and bounded zone rows remain.
+    assert counts[3] > 700
     assert ObjectAddress(0x200E, 0) in {
         entry.address for entry in catalog_for_node(identity, max_access_level=2)
     }
@@ -96,6 +98,39 @@ def test_evidenced_gateway_and_mk3_families_project_complete_catalog() -> None:
         assert len(complete) >= len(level_three)
         assert len({entry.address for entry in complete}) == len(complete)
         assert all(entry.node == raw.node for entry in complete)
+
+
+def test_mk3_does_not_expand_unrelated_255_item_arrays() -> None:
+    registry = Registry.load_default()
+    identity = resolve_device_identity(DeviceIdentity(99, 5123, 9, "MK3"))
+
+    catalog = catalog_for_node(identity, registry, max_access_level=3)
+    addresses = {entry.address for entry in catalog}
+
+    # The MK3 source profile establishes exactly two 30b7 elements. Its
+    # unrelated 255-item wire capacity is not evidence for 253 more objects.
+    assert {address for address in addresses if address.index == 0x30B7} == {
+        ObjectAddress(0x30B7, 1),
+        ObjectAddress(0x30B7, 2),
+    }
+    assert {address for address in addresses if address.index == 0x5139} == {
+        ObjectAddress(0x5139, 1)
+    }
+
+    # Explicit high-index family evidence stays available even when its array
+    # wire bound exceeds the zone-array expansion policy.
+    scb = resolve_device_identity(DeviceIdentity(4, None, None, "SCB-10"))
+    scb_addresses = {entry.address for entry in catalog_for_node(scb, registry, max_access_level=3)}
+    assert ObjectAddress(0x340C, 30) in scb_addresses
+
+    # 3401 has unresolved wire-type variants. Retain exact SCB evidence, but
+    # don't extrapolate sibling slots through a catalog-wide type conflict.
+    exact_3401 = {
+        row.address
+        for row in registry.get("3401:00").evidence.devices
+        if row.family.casefold() == "scb-10"
+    }
+    assert {address for address in scb_addresses if address.index == 0x3401} == exact_3401
 
 
 def test_scb_array_subindexes_are_concrete_family_rows() -> None:

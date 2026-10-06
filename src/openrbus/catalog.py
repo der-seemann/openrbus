@@ -204,12 +204,25 @@ def catalog_for_node(
             # belongs to another family.
             has_family_evidence = bool(family_rows)
             candidate_addresses = (definition.address, *sorted(family_rows))
-            if definition.wire.is_array and definition.wire.max_items is not None:
-                # Static source catalogs often contain a family definition
-                # for one or more zones while the local installation has
-                # fewer active slots. Project only the canonical array's
-                # bounded element range; RegisterDefinition inherits access
-                # and write support only when sibling source rows agree.
+            if (
+                definition.wire.is_array
+                and definition.wire.max_items is not None
+                and definition.wire.max_items <= 10
+                and not definition.evidence.type_conflict
+                and (
+                    0x3400 <= definition.address.index <= 0x3477
+                    or 0x5402 <= definition.address.index <= 0x5444
+                )
+                and has_family_evidence
+            ):
+                # The manufacturer defines at most ten comparable heating/
+                # zone slots in these object ranges. Other CANopen arrays can
+                # have a wire bound of 255 while the family evidence records
+                # only one or two concrete items; expanding those arrays made
+                # an MK3's catalog exceed 3,000 speculative rows. Keep the
+                # bounded, type-consistent zone projection, but require
+                # evidence for this exact family and address before
+                # synthesizing its siblings.
                 candidate_addresses = (
                     *candidate_addresses,
                     *(

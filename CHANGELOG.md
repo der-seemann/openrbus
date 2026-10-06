@@ -10,6 +10,20 @@ semantic versioning while the project remains in pre-1.0 development.
 - Editable IAE/RXDX parameters with compatible bounded zone slots are exposed as regular controls when write access is enabled. Registers without an explicit read-only declaration can be exposed separately through a default-off experimental option. Read-only declarations, unresolved wire-type conflicts, access-level ambiguity, and invalid values remain blocked.
 - The Core registry and write client enforce the same regular and experimental write classification; HA requires its write and experimental opt-ins.
 
+## 0.4.4 — release candidate
+
+### Changed
+
+- Bound family-derived sibling expansion to small, type-consistent heating and
+  zone arrays with exact family evidence. Unrelated arrays with a wire bound
+  of 255 no longer generate speculative catalog rows; concrete source-backed
+  addresses remain available.
+
+### Compatibility
+
+- The CANopen protocol API is unchanged. Catalogs contain fewer inferred array
+  aliases where the source evidence does not establish those elements.
+
 ## 0.4.2 — release
 
 ### Added and changed
