@@ -179,6 +179,12 @@ class ThinGattSession:
         self._capability_seen = False
         self._lock = asyncio.Lock()
         self._attach_mode = False
+        self._event_queue: asyncio.Queue[Mapping[str, Any] | BaseException] = asyncio.Queue(
+            maxsize=64
+        )
+        self._event_pump_task: asyncio.Task[None] | None = None
+        self._event_operation_active = False
+        self._event_pump_error: BaseException | None = None
 
     async def prepare(self, *, timeout: float = 10.0, attach: bool = False) -> ConnectionIdentity:
         """Bootstrap capability and connect, returning the fenced identity."""
@@ -345,6 +351,7 @@ class ThinGattSession:
         return frame
 
     async def disconnect(self, *, timeout: float = 5.0) -> None:
+        await self.stop_event_pump()
         async with self._lock:
             request_id = self._next_request
             self._next_request += 1
@@ -377,6 +384,13 @@ class ThinGattSession:
         self._retired_operations.update(self._pending_operations)
         if self._connect_request is not None:
             self._retired_operations.add(self._connect_request)
+        task = self._event_pump_task
+        self._event_pump_task = None
+        if task is not None:
+            task.cancel()
+        self._event_operation_active = False
+        while not self._event_queue.empty():
+            self._event_queue.get_nowait()
         self._invalidate()
 
     async def _cancel_bootstrap(self, request_id: int, timeout: float) -> None:
@@ -413,15 +427,131 @@ class ThinGattSession:
             raise ThinGattCorrelationError("handles belong to a different session epoch")
         self.handles = handles
 
-    def accept_notification(self, notification: GattNotification) -> None:
+    def start_event_pump(self) -> None:
+        """Continuously drain the peer stream once link setup is complete."""
+        if self._event_pump_task is not None and not self._event_pump_task.done():
+            return
+        self._event_pump_error = None
+        self._event_pump_task = asyncio.create_task(self._run_event_pump())
+
+    async def stop_event_pump(self) -> None:
+        """Stop the sole stream consumer before retiring this session."""
+        task = self._event_pump_task
+        self._event_pump_task = None
+        self._event_operation_active = False
+        if task is None:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        while not self._event_queue.empty():
+            self._event_queue.get_nowait()
+
+    def begin_event_operation(self) -> None:
+        """Open a request boundary and discard notifications from the prior idle gap."""
+        if self._event_pump_error is not None:
+            raise self._event_pump_error
+        self._discard_queued_notifications()
+        self._event_operation_active = True
+
+    def end_event_operation(self) -> None:
+        """Close a request boundary so later unsolicited notifications are dropped."""
+        self._event_operation_active = False
+        self._discard_queued_notifications()
+
+    def _discard_queued_notifications(self) -> None:
+        retained: list[Mapping[str, Any] | BaseException] = []
+        while not self._event_queue.empty():
+            item = self._event_queue.get_nowait()
+            if isinstance(item, BaseException) or item.get("op") != "NOTIFICATION":
+                retained.append(item)
+        for item in retained:
+            self._event_queue.put_nowait(item)
+
+    async def receive_frame(self, *, timeout: float) -> Mapping[str, Any] | None:
+        """Receive the next validated stream frame through its single owner."""
+        if timeout <= 0:
+            raise ValueError("poll timeout must be positive")
+        if self._event_pump_error is not None:
+            raise self._event_pump_error
+        task = self._event_pump_task
+        if (task is None or task.done()) and self._event_queue.empty():
+            frame = await self.channel.poll(timeout=timeout)
+            if frame is not None:
+                self.ingest(frame)
+            return frame
+        try:
+            item = await asyncio.wait_for(self._event_queue.get(), timeout=timeout)
+        except TimeoutError:
+            if self._event_pump_error is not None:
+                raise self._event_pump_error from None
+            return None
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    async def _run_event_pump(self) -> None:
+        """Drain notifications even between CAN requests; fail closed on stream errors."""
+        idle_delay = 0.02
+        try:
+            while True:
+                frame = await self.channel.poll(timeout=self.poll_timeout)
+                if frame is None:
+                    # The ESP poll action returns immediately for an empty ring.
+                    # Back off while idle, then return to a short cadence as soon
+                    # as traffic arrives. This avoids a tight Native-API loop.
+                    await asyncio.sleep(min(idle_delay, self.poll_timeout))
+                    idle_delay = min(0.25, idle_delay * 2)
+                    continue
+                idle_delay = 0.02
+                self.ingest(frame)
+                if frame.get("op") == "NOTIFICATION" and not self._event_operation_active:
+                    continue
+                if (
+                    frame.get("kind") == "response"
+                    and frame.get("request_id") in self._retired_operations
+                ):
+                    continue
+                try:
+                    self._event_queue.put_nowait(frame)
+                except asyncio.QueueFull as exc:
+                    raise ThinGattCorrelationError(
+                        "Thin-GATT consumer event queue overflow"
+                    ) from exc
+                if frame.get("op") == "DISCONNECTED" or (
+                    frame.get("op") == "CONNECTION_STATE"
+                    and isinstance(frame.get("payload"), Mapping)
+                    and frame["payload"].get("state") in {"disconnected", "failed"}
+                ):
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self._event_pump_error = error
+            self.stream_error = (
+                error if isinstance(error, ThinGattFlowControlError) else self.stream_error
+            )
+            while not self._event_queue.empty():
+                self._event_queue.get_nowait()
+            self._event_queue.put_nowait(error)
+
+    def accept_notification(
+        self, notification: GattNotification, *, already_ingested: bool = False
+    ) -> None:
         """Validate a notification's epoch, identity, handle, and sequence."""
         if not self.connected or self.identity != notification.identity:
             raise ThinGattCorrelationError("notification identity is not current")
-        if notification.epoch != self.epoch or notification.seq != self.last_seq + 1:
+        valid_sequence = (
+            0 < notification.seq <= self.last_seq
+            if already_ingested
+            else notification.seq == self.last_seq + 1
+        )
+        if notification.epoch != self.epoch or not valid_sequence:
             raise ThinGattCorrelationError("notification is stale or out of sequence")
         if self.handles is not None and notification.handle not in self.handles.values.values():
             raise ThinGattCorrelationError("notification handle is not resolved")
-        self.last_seq = notification.seq
+        if not already_ingested:
+            self.last_seq = notification.seq
 
     def _frame_identity(self, frame: Mapping[str, Any]) -> ConnectionIdentity:
         try:
@@ -591,6 +721,7 @@ class ThinGattLink:
                 await self._write_current(
                     value_role, b"", response_role=notify_role, timeout=timeout
                 )
+            self.session.start_event_pump()
             return handles
 
     async def authenticate_gateway(self, *, timeout: float = 20.0) -> None:
@@ -797,6 +928,7 @@ class ThinGattLink:
         matched_event: dict[str, Any] | None = None
         need_notification = notification_handle is not None
         deadline = asyncio.get_running_loop().time() + timeout
+        self.session.begin_event_operation()
         try:
             await self.session.channel.action(
                 self.session.services.request, request_payload, timeout=timeout
@@ -809,7 +941,7 @@ class ThinGattLink:
                 remaining = deadline - asyncio.get_running_loop().time()
                 if remaining <= 0:
                     raise RequestTimeoutError(f"Thin-GATT {op} timed out")
-                frame = await self.session.channel.poll(timeout=min(self.poll_timeout, remaining))
+                frame = await self.session.receive_frame(timeout=min(self.poll_timeout, remaining))
                 if frame is None:
                     await asyncio.sleep(min(0.01, remaining))
                     continue
@@ -821,7 +953,6 @@ class ThinGattLink:
                     if notification_handle is None:
                         # Unsolicited notifications remain stream traffic; a
                         # caller cannot use one as proof for another operation.
-                        self.session.ingest(frame)
                         continue
                     candidate_payload = frame.get("payload")
                     candidate_handle = frame.get("handle")
@@ -833,10 +964,9 @@ class ThinGattLink:
                     ):
                         raise ThinGattCorrelationError("Thin-GATT notification token mismatch")
                     if frame.get("request_id") != request_id:
-                        self.session.ingest(frame)
                         continue
                     notification = self._notification_from_frame(frame, notification_handle)
-                    self.session.accept_notification(notification)
+                    self.session.accept_notification(notification, already_ingested=True)
                     # The proven ESP adapter treats a correlated notification
                     # as the terminal result for notification-waiting writes:
                     # it clears the pending firmware operation and emits no
@@ -861,11 +991,9 @@ class ThinGattLink:
                     # retired event to keep sequence correlation intact, but
                     # never allow an active/unknown token to complete this
                     # operation.
-                    self.session.ingest(frame)
                     if frame.get("request_id") in {0, *self.session._retired_operations}:
                         continue
                     raise ThinGattCorrelationError("Thin-GATT lifecycle event token mismatch")
-                self.session.ingest(frame)
                 if (
                     frame_kind == "event"
                     and event is not None
@@ -923,6 +1051,8 @@ class ThinGattLink:
             self.session._pending_operations.pop(request_id, None)
             await self._cancel(request_id, identity, timeout)
             raise
+        finally:
+            self.session.end_event_operation()
 
     def _notification_from_frame(
         self, frame: Mapping[str, Any], expected_handle: int
@@ -1041,6 +1171,8 @@ class ThinGattMessageTransport:
         if not self.is_connected:
             await self.connect()
         async with self._request_lock:
+            self.session.start_event_pump()
+            self.session.begin_event_operation()
             self.reassembler.reset()
             request_ids: list[int] = []
             identity = self.session.identity
@@ -1056,35 +1188,43 @@ class ThinGattMessageTransport:
                 complete_result: bytes | None = None
                 deadline = asyncio.get_running_loop().time() + timeout
                 for segment in self.codec.encode(message):
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        raise RequestTimeoutError("Thin-GATT message response timed out")
                     request_id = self.session.register_request("WRITE_CHAR")
                     request_ids.append(request_id)
-                    await self.session.channel.action(
-                        self.session.services.request,
-                        {
-                            "op": "WRITE_CHAR",
-                            "request_id": request_id,
-                            "epoch": self.session.epoch,
-                            "gattc_if": identity.gattc_if,
-                            "conn_id": identity.conn_id,
-                            "handle": request_handle,
-                            "value": base64.b64encode(segment).decode("ascii"),
-                            "response": True,
-                        },
-                        timeout=timeout,
-                    )
+                    try:
+                        await asyncio.wait_for(
+                            self.session.channel.action(
+                                self.session.services.request,
+                                {
+                                    "op": "WRITE_CHAR",
+                                    "request_id": request_id,
+                                    "epoch": self.session.epoch,
+                                    "gattc_if": identity.gattc_if,
+                                    "conn_id": identity.conn_id,
+                                    "handle": request_handle,
+                                    "value": base64.b64encode(segment).decode("ascii"),
+                                    "response": True,
+                                },
+                                timeout=remaining,
+                            ),
+                            timeout=remaining,
+                        )
+                    except TimeoutError as exc:
+                        raise RequestTimeoutError("Thin-GATT message response timed out") from exc
                     acknowledged = False
                     while not acknowledged:
                         remaining = deadline - asyncio.get_running_loop().time()
                         if remaining <= 0:
                             raise RequestTimeoutError("Thin-GATT message response timed out")
-                        frame = await self.session.channel.poll(timeout=remaining)
+                        frame = await self.session.receive_frame(timeout=remaining)
                         if frame is None:
                             continue
                         if frame.get("op") == "NOTIFICATION":
                             self._consume_notification(frame, response_handle)
                             complete_result = self.reassembler.feed(frame["payload"]["value"])
                             continue
-                        self.session.ingest(frame)
                         if frame.get("op") == "DISCONNECTED":
                             raise TransportError("Thin-GATT disconnected during message request")
                         if frame.get("op") == "WRITE_CHAR":
@@ -1096,11 +1236,10 @@ class ThinGattMessageTransport:
                     remaining = deadline - asyncio.get_running_loop().time()
                     if remaining <= 0:
                         raise RequestTimeoutError("Thin-GATT message response timed out")
-                    frame = await self.session.channel.poll(timeout=remaining)
+                    frame = await self.session.receive_frame(timeout=remaining)
                     if frame is None:
                         continue
                     if frame.get("op") != "NOTIFICATION":
-                        self.session.ingest(frame)
                         if frame.get("op") == "DISCONNECTED":
                             raise TransportError("Thin-GATT disconnected during message request")
                         continue
@@ -1110,6 +1249,8 @@ class ThinGattMessageTransport:
             except Exception:
                 await self._abort(request_ids, timeout)
                 raise
+            finally:
+                self.session.end_event_operation()
 
     def _consume_notification(self, frame: Mapping[str, Any], response_handle: int) -> None:
         payload = frame.get("payload")
@@ -1126,9 +1267,10 @@ class ThinGattMessageTransport:
             raise ThinGattCorrelationError(
                 "notification handle is not the configured response handle"
             )
-        self.session.accept_notification(notification)
+        self.session.accept_notification(notification, already_ingested=True)
 
     async def _abort(self, request_ids: list[int], timeout: float) -> None:
+        await self.session.stop_event_pump()
         identity = self.session.identity
         for request_id in request_ids:
             with contextlib.suppress(Exception):

@@ -3,6 +3,13 @@
 All notable changes to OpenRBus are documented here. Version numbers follow
 semantic versioning while the project remains in pre-1.0 development.
 
+## 0.4.5 — release candidate
+
+### Fixed
+
+- Bound each Thin-GATT segment dispatch to the remaining end-to-end message
+  deadline, including service-action time as well as acknowledgement polling.
+
 ## 0.4.3 — release
 
 ### Added and changed

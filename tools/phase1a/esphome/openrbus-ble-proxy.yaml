@@ -48,6 +48,14 @@ api:
         - api.respond:
             data: !lambda |-
               root["frame"] = openrbus_thin_gatt::instance().poll_frame();
+    - action: openrbus_gatt_rpc_poll_batch
+      supports_response: only
+      then:
+        - api.respond:
+            data: !lambda |-
+              JsonArray frames = root.createNestedArray("frames");
+              for (const auto &frame : openrbus_thin_gatt::instance().poll_frames())
+                frames.add(frame);
     - action: openrbus_gatt_rpc_diagnostics
       supports_response: only
       then:
