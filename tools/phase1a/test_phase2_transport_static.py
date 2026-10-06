@@ -45,6 +45,36 @@ class Phase2TransportStaticChecks(unittest.TestCase):
         self.assertIn("ATT_TIMEOUT_MS", rpc)
         self.assertIn('this->response(request_id, op, "ERROR", "timeout")', rpc)
 
+    def test_batch_poll_is_additive_fifo_and_response_bounded(self) -> None:
+        rpc = (ROOT / "openrbus_gatt_rpc.h").read_text()
+        self.assertIn("std::string poll_frame()", rpc)
+        self.assertIn("std::vector<std::string> poll_frames()", rpc)
+        self.assertIn("MAX_POLL_BATCH_FRAMES = 8", rpc)
+        self.assertIn("MAX_POLL_BATCH_RESPONSE_BYTES = 16 * 1024", rpc)
+        self.assertIn("json_string_encoded_size(next)", rpc)
+        self.assertIn("this->events_.front()", rpc)
+        self.assertIn("this->events_.pop_front()", rpc)
+        self.assertIn("openrbus_gatt_rpc_poll_batch", YAML)
+        self.assertIn('createNestedArray("frames")', YAML)
+
+    def test_batch_poll_budget_is_inclusive_and_capped_at_eight(self) -> None:
+        rpc = (ROOT / "openrbus_gatt_rpc.h").read_text()
+        self.assertIn("frames.size() < MAX_POLL_BATCH_FRAMES", rpc)
+        self.assertIn(">\n          MAX_POLL_BATCH_RESPONSE_BYTES", rpc)
+        self.assertIn("response_bytes += comma_bytes + item_bytes", rpc)
+
+        # Exercise the documented wire-size arithmetic at the exact boundary:
+        # wrapper + N escaped strings + commas. The implementation's guard is
+        # inclusive at 16 KiB and stops before consuming an over-budget item.
+        limit = 16 * 1024
+        wrapper_bytes = len('{"frames":[]}')
+        base_frame_bytes, extra_bytes = divmod(limit - wrapper_bytes - 7, 8)
+        sizes = [base_frame_bytes + 1] * extra_bytes + [base_frame_bytes] * (8 - extra_bytes)
+        used = wrapper_bytes + sum(sizes) + len(sizes) - 1
+        self.assertLessEqual(used, limit)
+        self.assertEqual(len(sizes), 8)
+        self.assertGreater(used + 1, limit)
+
     def test_rpc_does_not_cast_invalid_negative_ids_to_wire_ids(self) -> None:
         rpc = (ROOT / "openrbus_gatt_rpc.h").read_text()
         guard = "if (action_request_id <= 0)"

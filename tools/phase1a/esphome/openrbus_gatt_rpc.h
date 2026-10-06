@@ -15,6 +15,7 @@
 #include <esp_gattc_api.h>
 #include <esp_gap_ble_api.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -46,7 +47,9 @@ class Rpc final : public esphome::Component,
   static constexpr const char *STATUS_ERROR = "ERROR";
   static constexpr size_t MAX_PAYLOAD_BYTES = 512;
   static constexpr size_t MAX_FRAME_BYTES = 2048;
-  static constexpr size_t MAX_EVENT_QUEUE = 16;
+  static constexpr size_t MAX_EVENT_QUEUE = 32;
+  static constexpr size_t MAX_POLL_BATCH_FRAMES = 8;
+  static constexpr size_t MAX_POLL_BATCH_RESPONSE_BYTES = 16 * 1024;
   static constexpr size_t MAX_KNOWN_HANDLES = 64;
   static constexpr uint32_t PAIR_TIMEOUT_MS = 10000;
   static constexpr uint32_t PAIR_DIAGNOSTIC_COUNTER_MAX = 65535;
@@ -117,6 +120,41 @@ class Rpc final : public esphome::Component,
     return event;
   }
 
+  // Drain a bounded FIFO prefix for the opt-in batch API. Keep poll_frame()
+  // unchanged for existing clients and older ESPHome service contracts.
+  std::vector<std::string> poll_frames() {
+    this->diagnostics_.poll_batch_calls++;
+    this->diagnostics_.poll_queue_depth_before = this->events_.size();
+    std::vector<std::string> frames;
+    frames.reserve(std::min(MAX_POLL_BATCH_FRAMES, this->events_.size()));
+    // The response is serialized as {"frames":["...", ...]}. Count the
+    // escaped JSON string bytes as well as the fixed wrapper so unusually
+    // large but valid envelopes cannot exceed the 16 KiB API response cap.
+    // A frame is moved only after it fits; the remaining queue stays FIFO.
+    size_t response_bytes = sizeof("{\"frames\":[]}") - 1;
+    while (frames.size() < MAX_POLL_BATCH_FRAMES && !this->events_.empty()) {
+      const std::string &next = this->events_.front();
+      const size_t item_bytes = json_string_encoded_size(next);
+      const size_t comma_bytes = frames.empty() ? 0 : 1;
+      if (response_bytes + comma_bytes + item_bytes >
+          MAX_POLL_BATCH_RESPONSE_BYTES)
+        break;
+      response_bytes += comma_bytes + item_bytes;
+      frames.push_back(std::move(this->events_.front()));
+      this->events_.pop_front();
+      if (this->capability_pending_ &&
+          frames.back().find("\"op\":\"CAPABILITY\"") != std::string::npos)
+        this->capability_pending_ = false;
+    }
+    const size_t count = frames.size();
+    if (count == 0)
+      this->diagnostics_.poll_empty_returns++;
+    this->diagnostics_.poll_batch_frames += count;
+    this->diagnostics_.poll_nonempty_returns += count;
+    this->diagnostics_.poll_queue_depth_after = this->events_.size();
+    return frames;
+  }
+
   // Read-only, entity-free snapshot for diagnosing the bootstrap path.  The
   // schema intentionally contains only counters, booleans, bounded enums and
   // the current epoch; no peer identity, handles, payloads or credentials.
@@ -139,7 +177,11 @@ class Rpc final : public esphome::Component,
       root["epoch_count"] = this->diagnostics_.epoch_count;
       root["bootstrap_frames_discarded"] = this->diagnostics_.bootstrap_frames_discarded;
       root["event_queue_depth"] = this->events_.size();
+      root["event_queue_high_watermark"] =
+          this->diagnostics_.event_queue_high_watermark;
       root["poll_frame_calls"] = this->diagnostics_.poll_frame_calls;
+      root["poll_batch_calls"] = this->diagnostics_.poll_batch_calls;
+      root["poll_batch_frames"] = this->diagnostics_.poll_batch_frames;
       root["poll_nonempty_returns"] = this->diagnostics_.poll_nonempty_returns;
       root["poll_empty_returns"] = this->diagnostics_.poll_empty_returns;
       root["poll_queue_depth_before"] = this->diagnostics_.poll_queue_depth_before;
@@ -169,6 +211,10 @@ class Rpc final : public esphome::Component,
       root["pair_last_auth_code"] = this->diagnostics_.pair_last_auth_code;
       root["last_enqueued_kind"] = this->diagnostics_.last_enqueued_kind;
       root["last_enqueued_op"] = this->diagnostics_.last_enqueued_op;
+      root["last_flow_control_reason"] =
+          this->diagnostics_.last_flow_control_reason;
+      root["flow_control_queue_full"] =
+          this->diagnostics_.flow_control_queue_full;
       root["last_callback_event"] = this->diagnostics_.last_event;
       root["last_callback_status"] = this->diagnostics_.last_status;
     }));
@@ -728,6 +774,19 @@ class Rpc final : public esphome::Component,
   }
 
  private:
+  static size_t json_string_encoded_size(const std::string &value) {
+    // Include the surrounding quotes. Quotes, backslashes, and control bytes
+    // expand when ESPHome serializes each frame as a JSON string.
+    size_t size = 2;
+    for (const unsigned char byte : value) {
+      if (byte == '"' || byte == '\\' || byte < 0x20)
+        size += byte < 0x20 ? 6 : 2;
+      else
+        size++;
+    }
+    return size;
+  }
+
   struct Diagnostics {
     uint32_t connect_requests{0};
     uint32_t parent_connect_calls{0};
@@ -739,10 +798,13 @@ class Rpc final : public esphome::Component,
     uint32_t epoch_count{0};
     uint32_t bootstrap_frames_discarded{0};
     uint32_t poll_frame_calls{0};
+    uint32_t poll_batch_calls{0};
+    uint32_t poll_batch_frames{0};
     uint32_t poll_nonempty_returns{0};
     uint32_t poll_empty_returns{0};
     uint32_t poll_queue_depth_before{0};
     uint32_t poll_queue_depth_after{0};
+    uint32_t event_queue_high_watermark{0};
     uint32_t total_frames_enqueued{0};
     uint32_t connect_responses_enqueued{0};
     uint32_t connected_state_enqueued{0};
@@ -763,6 +825,8 @@ class Rpc final : public esphome::Component,
     const char *last_enqueued_op{"none"};
     const char *last_event{"none"};
     const char *last_status{"none"};
+    const char *last_flow_control_reason{"none"};
+    uint32_t flow_control_queue_full{0};
     const char *pair_last_status{"none"};
     const char *pair_terminal_status{"none"};
     uint8_t pair_last_auth_code{PAIR_AUTH_CODE_UNAVAILABLE};
@@ -1253,6 +1317,8 @@ class Rpc final : public esphome::Component,
       return;
     }
     this->events_.push_back(std::move(value));
+    if (this->events_.size() > this->diagnostics_.event_queue_high_watermark)
+      this->diagnostics_.event_queue_high_watermark = this->events_.size();
     this->record_enqueued(this->events_.back());
   }
 
@@ -1281,6 +1347,10 @@ class Rpc final : public esphome::Component,
   void fatal_flow_control(const char *reason) {
     if (this->desynchronized_)
       return;
+    this->diagnostics_.last_flow_control_reason = reason;
+    if (std::strcmp(reason, "queue_full") == 0 &&
+        this->diagnostics_.flow_control_queue_full < UINT32_MAX)
+      this->diagnostics_.flow_control_queue_full++;
     this->desynchronized_ = true;
     this->events_.clear();
     // A bootstrap CONNECT has no PendingOp slot, so fence it explicitly with

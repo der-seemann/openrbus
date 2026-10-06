@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from collections import deque
 from collections.abc import Mapping
@@ -349,47 +350,63 @@ async def test_message_transport_roundtrip_reassembles_notifications() -> None:
 @pytest.mark.asyncio
 async def test_message_transport_acknowledges_each_write_segment_before_return() -> None:
     ident = {"gattc_if": 1, "conn_id": 0}
-    session = ThinGattSession(FakeChannel([]))
+    request = b"x" * 40
+    response = b"reply"
+    codec = ThinGattMessageTransport(
+        ThinGattSession(FakeChannel([])), request_handle=7, response_handle=42
+    ).codec
+    segments = codec.encode(request)
+    response_segments = codec.encode(response)
+
+    class AckChannel(FakeChannel):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.write_count = 0
+            self.seq = 1
+
+        async def action(self, name: str, payload: Mapping[str, Any], *, timeout: float) -> None:
+            await super().action(name, payload, timeout=timeout)
+            if payload.get("op") != "WRITE_CHAR":
+                return
+            self.write_count += 1
+            request_id = payload["request_id"]
+            if self.write_count == len(segments):
+                for segment in response_segments:
+                    self.seq += 1
+                    self.frames.append(
+                        frame(
+                            "event",
+                            "NOTIFICATION",
+                            2,
+                            self.seq,
+                            handle=42,
+                            payload={"value": segment},
+                            **ident,
+                        )
+                    )
+            self.frames.append(
+                frame(
+                    "response",
+                    "WRITE_CHAR",
+                    2,
+                    0,
+                    request_id=request_id,
+                    status="OK",
+                    payload={},
+                    **ident,
+                )
+            )
+
+    channel = AckChannel()
+    session = ThinGattSession(channel)
     session.connected, session.epoch, session.identity, session.last_seq = (
         True,
         2,
         ConnectionIdentity(1, 0),
         1,
     )
-    transport = ThinGattMessageTransport(session, request_handle=7, response_handle=42)
-    request = b"x" * 40
-    response = b"reply"
-    segments = transport.codec.encode(request)
-    response_segments = transport.codec.encode(response)
-    channel = cast(FakeChannel, session.channel)
-    channel.frames.extend(
-        [
-            frame(
-                "response",
-                "WRITE_CHAR",
-                2,
-                0,
-                request_id=index + 1,
-                status="OK",
-                payload={},
-                **ident,
-            )
-            for index in range(len(segments))
-        ]
-        + [
-            frame(
-                "event",
-                "NOTIFICATION",
-                2,
-                index + 2,
-                handle=42,
-                payload={"value": segment},
-                **ident,
-            )
-            for index, segment in enumerate(response_segments)
-        ]
-    )
     session.install_handles(GattHandles({"notify": 42}, epoch=2))
+    transport = ThinGattMessageTransport(session, request_handle=7, response_handle=42)
     assert await transport.request(request, timeout=1) == response
     assert session._pending_operations == {}
 
@@ -405,6 +422,144 @@ def active_transport() -> tuple[ThinGattSession, ThinGattMessageTransport, FakeC
     )
     session.install_handles(GattHandles({"notify": 42}, epoch=2))
     return session, ThinGattMessageTransport(session, request_handle=7, response_handle=42), channel
+
+
+class PumpTestChannel(FakeChannel):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.poll_calls = 0
+        self.active_polls = 0
+        self.max_active_polls = 0
+        self.next_seq = 1
+
+    async def poll(self, *, timeout: float) -> dict[str, Any] | None:
+        self.poll_calls += 1
+        self.active_polls += 1
+        self.max_active_polls = max(self.max_active_polls, self.active_polls)
+        try:
+            if self.frames:
+                return self.frames.popleft()
+            await asyncio.sleep(min(timeout, 0.002))
+            return None
+        finally:
+            self.active_polls -= 1
+
+    def notification(self, seq: int, value: bytes = b"x") -> dict[str, Any]:
+        return frame(
+            "event",
+            "NOTIFICATION",
+            2,
+            seq,
+            request_id=0,
+            handle=42,
+            payload={"value": value},
+            gattc_if=1,
+            conn_id=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_event_pump_drains_idle_and_burst_frames_with_single_owner() -> None:
+    channel = PumpTestChannel()
+    session = ThinGattSession(channel, poll_timeout=0.01)
+    session.connected, session.epoch, session.identity, session.last_seq = (
+        True,
+        2,
+        ConnectionIdentity(1, 0),
+        1,
+    )
+    session.install_handles(GattHandles({"response": 42}, epoch=2))
+    session.start_event_pump()
+
+    channel.frames.extend(channel.notification(seq) for seq in range(2, 42))
+    for _ in range(100):
+        if not channel.frames and session.last_seq == 41:
+            break
+        await asyncio.sleep(0.002)
+    assert not channel.frames
+    assert session.last_seq == 41
+    assert session._event_queue.empty()  # unsolicited idle notifications are retired
+
+    session.begin_event_operation()
+    request_id = session.register_request("WRITE_CHAR")
+    channel.frames.extend(channel.notification(seq) for seq in range(42, 82))
+    channel.frames.append(
+        frame(
+            "response",
+            "WRITE_CHAR",
+            2,
+            0,
+            request_id=request_id,
+            status="OK",
+            gattc_if=1,
+            conn_id=0,
+        )
+    )
+    for _ in range(100):
+        if not channel.frames and session._event_queue.qsize() == 41:
+            break
+        await asyncio.sleep(0.002)
+    assert session._event_queue.qsize() == 41
+    burst = [await session.receive_frame(timeout=0.1) for _ in range(41)]
+    assert sum(item is not None and item.get("op") == "NOTIFICATION" for item in burst) == 40
+    assert burst[-1] is not None and burst[-1].get("op") == "WRITE_CHAR"
+    session.end_event_operation()
+
+    await session.stop_event_pump()
+    stopped_at = channel.poll_calls
+    await asyncio.sleep(0.03)
+    assert channel.poll_calls == stopped_at
+    assert channel.max_active_polls == 1
+
+
+@pytest.mark.asyncio
+async def test_event_pump_keeps_concurrent_message_requests_serialized() -> None:
+    class ReplyChannel(PumpTestChannel):
+        async def action(self, name: str, payload: Mapping[str, Any], *, timeout: float) -> None:
+            await super().action(name, payload, timeout=timeout)
+            if payload.get("op") != "WRITE_CHAR":
+                return
+            request_id = payload["request_id"]
+            response = transport.codec.encode(b"reply")
+            for segment in response:
+                self.next_seq += 1
+                self.frames.append(self.notification(self.next_seq, segment))
+            self.frames.append(
+                frame(
+                    "response",
+                    "WRITE_CHAR",
+                    2,
+                    0,
+                    request_id=request_id,
+                    status="OK",
+                    gattc_if=1,
+                    conn_id=0,
+                )
+            )
+
+    channel = ReplyChannel()
+    session = ThinGattSession(channel, poll_timeout=0.01)
+    session.connected, session.epoch, session.identity, session.last_seq = (
+        True,
+        2,
+        ConnectionIdentity(1, 0),
+        1,
+    )
+    session.install_handles(GattHandles({"request": 7, "response": 42}, epoch=2))
+    transport = ThinGattMessageTransport(session, request_handle=7, response_handle=42)
+
+    results = await asyncio.gather(
+        transport.request(b"first", timeout=1),
+        transport.request(b"second", timeout=1),
+    )
+    assert results == [b"reply", b"reply"]
+    writes = [payload for _, payload in channel.actions if payload.get("op") == "WRITE_CHAR"]
+    assert len(writes) == 2
+    assert [payload["request_id"] for payload in writes] == sorted(
+        payload["request_id"] for payload in writes
+    )
+    assert channel.max_active_polls == 1
+    await session.stop_event_pump()
 
 
 @pytest.mark.asyncio
@@ -444,6 +599,44 @@ async def test_adapter_timeout_emits_cancel_and_cleans_reassembly() -> None:
         await transport.request(b"x", timeout=0.01)
     assert session._pending_operations == {}
     assert any(payload["op"] == "CANCEL" for _, payload in channel.actions)
+
+
+@pytest.mark.asyncio
+async def test_message_segment_dispatch_uses_remaining_end_to_end_deadline() -> None:
+    class SlowActionChannel(FakeChannel):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.action_timeouts: list[float] = []
+
+        async def action(self, name: str, payload: Mapping[str, Any], *, timeout: float) -> None:
+            await super().action(name, payload, timeout=timeout)
+            if payload.get("op") == "WRITE_CHAR":
+                self.action_timeouts.append(timeout)
+                # Model a service-dispatch call which is slow but obeys only
+                # cancellation; the overall message deadline is shorter.
+                await asyncio.sleep(0.2)
+
+    channel = SlowActionChannel()
+    session = ThinGattSession(channel)
+    session.connected = True
+    session.epoch = 2
+    session.identity = ConnectionIdentity(1, 0)
+    session.last_seq = 1
+    session.install_handles(GattHandles({"notify": 42}, epoch=2))
+    transport = ThinGattMessageTransport(session, request_handle=7, response_handle=42)
+    timeout = 0.03
+    started = asyncio.get_running_loop().time()
+
+    with pytest.raises(RequestTimeoutError):
+        await transport.request(b"x" * 40, timeout=timeout)
+
+    elapsed = asyncio.get_running_loop().time() - started
+    writes = [payload for _, payload in channel.actions if payload.get("op") == "WRITE_CHAR"]
+    assert elapsed < 0.15
+    assert len(writes) == 1
+    assert len(channel.action_timeouts) == 1
+    assert 0 < channel.action_timeouts[0] <= timeout
+    assert session._pending_operations == {}
 
 
 @pytest.mark.asyncio
