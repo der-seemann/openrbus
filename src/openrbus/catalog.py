@@ -9,7 +9,7 @@ from decimal import Decimal
 from .discovery import CapabilityReference, DeviceIdentity
 from .inventory import DeviceInventory
 from .protocol.canip import ObjectAddress
-from .registry import AccessOperation, RegisterDefinition, Registry
+from .registry import AccessOperation, RegisterDefinition, Registry, WriteClassification
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +29,7 @@ class RegisterCatalogEntry:
     readable: bool
     writable: bool
     write_declared: bool
+    write_classification: str
     access_level_evidence: dict[str, object]
     safety: str
     provenance: tuple[str, ...]
@@ -54,6 +55,7 @@ class RegisterCatalogEntry:
             "readable": self.readable,
             "writable": self.writable,
             "write_declared": self.write_declared,
+            "write_classification": self.write_classification,
             "access_level_evidence": self.access_level_evidence,
             "safety": self.safety,
             "provenance": list(self.provenance),
@@ -70,36 +72,12 @@ def _entry(
     write_requirement = definition.access_requirement(
         address, AccessOperation.WRITE, device_family=family
     )
-    matching_write_rows = tuple(
-        row
-        for row in definition.evidence.devices
-        if row.address == address
-        and family is not None
-        and row.family.casefold() == family.casefold()
-    )
+    classification = definition.write_classification_for(address, family)
     evidenced_writable = (
-        definition.access.writable_declared
-        and definition.write_safety_for(address, family).value in {"validated", "source_supported"}
-        and write_requirement.is_known
-        and (
-            (
-                definition.write_safety_for(address, family).value == "source_supported"
-                and (
-                    bool(matching_write_rows)
-                    or definition._array_slot_has_source_support(address, family)
-                )
-            )
-            or (
-                bool(matching_write_rows)
-                and all(row.writable_all is True for row in matching_write_rows)
-            )
-        )
+        classification is WriteClassification.REGULAR and write_requirement.is_known
     )
     experimental_writable = (
-        experimental_writes
-        and definition.access.writable_declared
-        and definition.write_safety_for(address, family).value == "unverified"
-        and not definition.evidence.type_conflict
+        experimental_writes and classification is WriteClassification.EXPERIMENTAL
     )
 
     def evidence(operation: AccessOperation) -> dict[str, object]:
@@ -128,6 +106,7 @@ def _entry(
         readable=definition.access.readable_declared,
         writable=evidenced_writable or experimental_writable,
         write_declared=definition.access.writable_declared,
+        write_classification=classification.value,
         access_level_evidence={
             "read": evidence(AccessOperation.READ),
             "write": evidence(AccessOperation.WRITE),

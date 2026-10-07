@@ -150,6 +150,7 @@ def test_scb_array_subindexes_are_concrete_family_rows() -> None:
         assert cp733.access_level_evidence["read"]["required_level"] == "professional"
         assert cp733.access_level_evidence["write"]["required_level"] == "professional"
         assert cp733.safety == "validated"
+        assert cp733.write_classification == "regular"
         assert all(entry.writable for entry in catalog if entry.address.index == 0x346A)
 
     # EHC-16 receives comparable bounded zone rows with its own source
@@ -163,7 +164,8 @@ def test_scb_array_subindexes_are_concrete_family_rows() -> None:
         if entry.address == ObjectAddress(0x346A, 4)
     )
     assert ehc_cp733.writable is True
-    assert ehc_cp733.safety == "source_supported"
+    assert ehc_cp733.safety == "unverified"
+    assert ehc_cp733.write_classification == "regular"
 
 
 def test_iae_source_supported_write_is_exact_family_and_readonly_stays_blocked() -> None:
@@ -176,7 +178,8 @@ def test_iae_source_supported_write_is_exact_family_and_readonly_stays_blocked()
     )
     assert row.writable is True
     assert row.write_declared is True
-    assert row.safety == "source_supported"
+    assert row.safety == "unverified"
+    assert row.write_classification == "regular"
     assert row.access_level_evidence["write"]["required_level"] == "installer"
 
     explicit_ro = registry.get("348d:00")
@@ -188,3 +191,69 @@ def test_iae_source_supported_write_is_exact_family_and_readonly_stays_blocked()
     )
     assert ro_row.writable is False
     assert ro_row.write_declared is False
+    assert ro_row.write_classification == "read_only"
+    # The bounded header remains blocked; an OBD read-only declaration that
+    # contradicts positive IAE evidence on a member remains a conflict.
+    assert (
+        explicit_ro.write_classification_for(ObjectAddress(0x348D, 1), "Ehc-16").value == "conflict"
+    )
+
+
+def test_catalog_write_classification_separates_iae_from_physical_validation() -> None:
+    registry = Registry.load_default()
+    ehc = resolve_device_identity(DeviceIdentity(12, 528, None, None))
+    rows = {row.address: row for row in catalog_for_node(ehc, registry, max_access_level=3)}
+
+    # Direct IAE evidence and a matching bounded family slot classify regular;
+    # neither claim says that this physical device was write-validated.
+    assert rows[ObjectAddress(0x346A, 1)].write_classification == "regular"
+    assert rows[ObjectAddress(0x346A, 4)].write_classification == "regular"
+    assert rows[ObjectAddress(0x346A, 4)].safety == "unverified"
+    assert (
+        registry.get("346a:00").write_classification_for(ObjectAddress(0x346A, 0), "Ehc-16").value
+        == "read_only"
+    )
+    assert (
+        registry.get("200e:00").write_classification_for(ObjectAddress(0x200E, 0), None).value
+        == "unknown"
+    )
+
+    obd_only = registry.get("1000:00")
+    default_rows = {
+        row.address: row for row in catalog_for_node(4, registry, capabilities=(obd_only.address,))
+    }
+    experimental_rows = {
+        row.address: row
+        for row in catalog_for_node(
+            4, registry, capabilities=(obd_only.address,), experimental_writes=True
+        )
+    }
+    assert obd_only.write_classification_for(obd_only.address, "Scb-10").value == "experimental"
+    assert default_rows[obd_only.address].write_classification == "experimental"
+    assert default_rows[obd_only.address].writable is False
+    assert experimental_rows[obd_only.address].writable is True
+    assert (
+        registry.get("500f:00").write_classification_for(ObjectAddress(0x500F, 0), "Scb-10").value
+        == "read_only"
+    )
+
+
+def test_explicit_family_ro_sibling_blocks_only_unobserved_array_inference() -> None:
+    from dataclasses import replace
+
+    registry = Registry.load_default()
+    definition = registry.get("346a:00")
+    target = ObjectAddress(0x346A, 9)
+    evidence = tuple(
+        replace(row, writable_any=False, writable_all=False)
+        if row.family.casefold() == "scb-10" and row.address == ObjectAddress(0x346A, 5)
+        else row
+        for row in definition.evidence.devices
+    )
+    conflicted = replace(definition, evidence=replace(definition.evidence, devices=evidence))
+
+    assert conflicted.write_classification_for(target, "Scb-10").value == "conflict"
+    # Exact positive source rows remain regular even with an unrelated RO slot.
+    assert (
+        conflicted.write_classification_for(ObjectAddress(0x346A, 4), "Scb-10").value == "regular"
+    )
