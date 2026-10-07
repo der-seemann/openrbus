@@ -48,12 +48,22 @@ class WireType(StrEnum):
 
 
 class WriteSafety(StrEnum):
-    """Conservative write classification carried by every register."""
+    """Physical write-validation status carried separately from source class."""
 
     READ_ONLY = "read_only"
     UNVERIFIED = "unverified"
     SOURCE_SUPPORTED = "source_supported"
     VALIDATED = "validated"
+
+
+class WriteClassification(StrEnum):
+    """Source-backed write class, independent of physical validation."""
+
+    READ_ONLY = "read_only"
+    REGULAR = "regular"
+    EXPERIMENTAL = "experimental"
+    CONFLICT = "conflict"
+    UNKNOWN = "unknown"
 
 
 class AccessLevel(IntEnum):
@@ -170,7 +180,7 @@ class ValueConstraint:
 
 @dataclass(frozen=True, slots=True)
 class SafetyDefinition:
-    """Write safety classification for the public client."""
+    """Physical validation evidence and historical safety metadata."""
 
     write: WriteSafety
     requires_unsafe_opt_in: bool
@@ -331,7 +341,7 @@ class RegisterDefinition:
         return self.names.for_locale(locale)
 
     def write_safety_for(self, address: RegisterAddress, device_family: str | None) -> WriteSafety:
-        """Resolve safety for a concrete address without widening array evidence."""
+        """Resolve physical validation status without treating metadata as validation."""
         if self.safety.write is WriteSafety.VALIDATED:
             return WriteSafety.VALIDATED
         if device_family is not None and any(
@@ -339,19 +349,85 @@ class RegisterDefinition:
             for family, row_address in self.safety.validated_devices
         ):
             return WriteSafety.VALIDATED
-        if device_family is not None and any(
-            row_address == address and family.casefold() == device_family.casefold()
-            for family, row_address in self.safety.source_supported_devices
-        ):
-            return WriteSafety.SOURCE_SUPPORTED
-        if self._array_slot_has_source_support(address, device_family):
-            return WriteSafety.SOURCE_SUPPORTED
         return self.safety.write
+
+    def write_classification_for(
+        self, address: RegisterAddress, device_family: str | None
+    ) -> WriteClassification:
+        """Classify source evidence separately from physical write validation.
+
+        IAE parameter metadata is regular source RW only for an exact family
+        and subindex with consistent writable, read-level, and write-level
+        facts. Comparable bounded array members may inherit that classification
+        when the family has positive peers, uniform access levels, and no
+        explicit read-only sibling. RXDX presence/type and PCST configuration
+        readonly metadata are not represented as writable DeviceEvidence.
+        """
+        if not self.access.writable_declared:
+            # A global OBD read-only declaration conflicts with positive
+            # source RW facts for this exact slot; keep the contradiction
+            # blocked instead of silently choosing either source.
+            return (
+                WriteClassification.CONFLICT
+                if any(
+                    row.address == address and row.writable_any is True
+                    for row in self.evidence.devices
+                )
+                else WriteClassification.READ_ONLY
+            )
+        if self.evidence.type_conflict:
+            return WriteClassification.CONFLICT
+        if self.wire.is_array and address.index == self.address.index and address.subindex == 0:
+            return WriteClassification.READ_ONLY
+
+        rows = tuple(row for row in self.evidence.devices if row.address == address)
+        matching = (
+            tuple(row for row in rows if row.family.casefold() == device_family.casefold())
+            if device_family
+            else ()
+        )
+        if matching:
+            if any(row.writable_all is False for row in matching):
+                return (
+                    WriteClassification.CONFLICT
+                    if any(row.writable_any is True for row in matching)
+                    else WriteClassification.READ_ONLY
+                )
+            if all(
+                row.writable_all is True
+                and row.required_read_level is not None
+                and row.required_write_level is not None
+                for row in matching
+            ):
+                return WriteClassification.REGULAR
+            return WriteClassification.UNKNOWN
+
+        if rows and not device_family:
+            return WriteClassification.UNKNOWN
+        if device_family and self._array_slot_has_source_support(address, device_family):
+            return WriteClassification.REGULAR
+
+        # A nearby family slot with explicit RO evidence blocks inferring this
+        # missing array slot. Do not fall back to the global OBD declaration.
+        if device_family and self.wire.is_array and address.index == self.address.index:
+            siblings = tuple(
+                row
+                for row in self.evidence.devices
+                if row.family.casefold() == device_family.casefold()
+                and row.address.index == address.index
+                and row.address.subindex > 0
+            )
+            if any(row.writable_all is False for row in siblings):
+                return WriteClassification.CONFLICT
+
+        # Rows for another family do not grant or veto this family's OBD-only
+        # experimental classification. Exact family uncertainty returned above.
+        return WriteClassification.EXPERIMENTAL
 
     def _array_slot_has_source_support(
         self, address: RegisterAddress, device_family: str | None
     ) -> bool:
-        """Inherit uniform source RW facts to an unobserved bounded array slot."""
+        """Inherit uniform source RW facts to a bounded, unobserved family slot."""
         if (
             not device_family
             or not self.wire.is_array
@@ -371,16 +447,22 @@ class RegisterDefinition:
         )
         if not siblings or any(row.writable_all is False for row in siblings):
             return False
-        supported = {
-            peer_address
-            for peer_family, peer_address in self.safety.source_supported_devices
-            if peer_family.casefold() == family
-            and peer_address.index == address.index
-            and peer_address.subindex > 0
-        }
-        peers = tuple(row for row in siblings if row.address in supported)
+        peers = tuple(
+            row
+            for row in siblings
+            if row.writable_all is True
+            and row.required_read_level is not None
+            and row.required_write_level is not None
+        )
         levels = {row.required_write_level for row in peers}
-        return bool(peers) and None not in levels and len(levels) == 1
+        read_levels = {row.required_read_level for row in peers}
+        return (
+            bool(peers)
+            and None not in levels
+            and None not in read_levels
+            and len(levels) == 1
+            and len(read_levels) == 1
+        )
 
     def access_requirement(
         self,
@@ -401,17 +483,13 @@ class RegisterDefinition:
         if device_family is not None:
             rows = tuple(row for row in rows if row.family.casefold() == device_family.casefold())
             if not rows and self._array_slot_has_source_support(address, device_family):
-                source_peers = {
-                    peer_address
-                    for peer_family, peer_address in self.safety.source_supported_devices
-                    if peer_family.casefold() == device_family.casefold()
-                    and peer_address.index == address.index
-                }
                 rows = tuple(
                     row
                     for row in self.evidence.devices
                     if row.family.casefold() == device_family.casefold()
-                    and row.address in source_peers
+                    and row.address.index == address.index
+                    and row.address.subindex > 0
+                    and row.writable_all is True
                 )
         levels: list[AccessLevel] = []
         complete = bool(rows)

@@ -23,7 +23,6 @@ from openrbus.errors import (
     CanOpenAbortError,
     InsufficientAccessLevelError,
     ProtocolError,
-    UnsafeWriteError,
     ValidationError,
     WritesDisabledError,
     WriteVerificationError,
@@ -35,6 +34,7 @@ from openrbus.registry import (
     RegisterDefinition,
     Registry,
     ValueConstraint,
+    WriteClassification,
 )
 from openrbus.value_codec import (
     CanOpenTimeOfDay,
@@ -384,19 +384,22 @@ class OpenRBusClient:
             raise WritesDisabledError("writes require enable_writes=True")
         if not definition.access.writable_declared:
             raise ValidationError(f"register {address} is not declared writable")
-        # Manufacturer metadata alone does not establish that a concrete
-        # device supports a safe write. Require positive, complete evidence
-        # for the exact family before exposing this operation.
-        write_safety = definition.write_safety_for(address, device_family).value
-        if write_safety not in {"validated", "source_supported"} and not (
-            write_safety == "unverified" and allow_unsafe
-        ):
-            raise ValidationError(
-                f"register {address} is not validated writable; experimental writes are disabled"
-            )
         if definition.evidence.type_conflict:
             raise ValidationError(
                 f"register {address} has unresolved device-specific wire-type conflicts"
+            )
+
+        classification = definition.write_classification_for(address, device_family)
+        if classification in {
+            WriteClassification.READ_ONLY,
+            WriteClassification.CONFLICT,
+        }:
+            raise ValidationError(
+                f"register {address} has no unambiguous writable source classification"
+            )
+        if classification is WriteClassification.EXPERIMENTAL and not allow_unsafe:
+            raise ValidationError(
+                f"register {address} is experimental; experimental writes are disabled"
             )
 
         access_requirement = self.registry.access_requirement(
@@ -416,13 +419,9 @@ class OpenRBusClient:
         assert required_access_level is not None
         assert required_access_level == required_for_policy
 
-        if (
-            definition.safety.requires_unsafe_opt_in
-            and write_safety == "unverified"
-            and not allow_unsafe
-        ):
-            raise UnsafeWriteError(
-                f"register {address} is unverified and requires allow_unsafe=True"
+        if classification is WriteClassification.UNKNOWN:
+            raise ValidationError(
+                f"register {address} has no unambiguous writable source classification"
             )
 
         matching_evidence = tuple(
@@ -432,21 +431,26 @@ class OpenRBusClient:
             and device_family is not None
             and row.family.casefold() == device_family.casefold()
         )
-        # Experimental writes are explicitly acknowledged by the caller and
-        # are defined by the manufacturer registry's IsReadOnly=False flag.
-        # They still pass the same access-level, datatype, range and enum
-        # checks below. Ordinary source-supported writes require exact-family
-        # positive IAE evidence.
-        experimental = allow_unsafe and write_safety == "unverified"
-        source_supported = write_safety == "source_supported"
-        if not experimental and not matching_evidence:
+        # Experimental writes are backed only by the global OBD declaration.
+        # Regular writes use exact-family IAE facts or a bounded family-array
+        # inference, then pass the same access, type, range and enum checks.
+        inherited = (
+            classification is WriteClassification.REGULAR
+            and not matching_evidence
+            and definition._array_slot_has_source_support(address, device_family)
+        )
+        if (
+            classification is WriteClassification.REGULAR
+            and not matching_evidence
+            and not inherited
+        ):
             raise ValidationError(
                 f"register {address} lacks exact evidence in device family "
                 f"{device_family or 'unknown'}"
             )
         if (
-            not experimental
-            and not source_supported
+            classification is WriteClassification.REGULAR
+            and not inherited
             and not all(row.writable_all is True for row in matching_evidence)
         ):
             raise ValidationError(
