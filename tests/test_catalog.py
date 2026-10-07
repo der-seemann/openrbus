@@ -234,7 +234,7 @@ def test_catalog_write_classification_separates_iae_from_physical_validation() -
     assert obd_only.write_classification_for(obd_only.address, "Scb-10").value == "experimental"
     assert default_rows[obd_only.address].write_classification == "experimental"
     assert default_rows[obd_only.address].writable is False
-    assert experimental_rows[obd_only.address].writable is True
+    assert experimental_rows[obd_only.address].writable is False
     assert (
         registry.get("500f:00").write_classification_for(ObjectAddress(0x500F, 0), "Scb-10").value
         == "read_only"
@@ -285,6 +285,7 @@ def test_catalog_write_flag_requires_one_complete_unambiguous_level() -> None:
             write_classification_for=lambda *_args: classification,
             write_safety_for=lambda *_args: WriteSafety.UNVERIFIED,
             evidence=SimpleNamespace(type_conflict=False, device_families=()),
+            code=None,
             names=SimpleNamespace(de="Synthetic", en="Synthetic"),
             wire=SimpleNamespace(
                 type=SimpleNamespace(value="UINT16"),
