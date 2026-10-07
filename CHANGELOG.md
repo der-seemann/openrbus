@@ -3,14 +3,20 @@
 All notable changes to OpenRBus are documented here. Version numbers follow
 semantic versioning while the project remains in pre-1.0 development.
 
-## 0.4.6 — release candidate
+## 0.4.6 — 2026-10-07
 
 ### Changed
 
-- Classify source-backed RW independently from physical write validation.
-- Require one complete, unambiguous write access level before the catalog
-  marks regular or experimental controls writable.
-- Keep OBD-only writable declarations behind the experimental opt-in.
+- Separate source-backed write classification from physical write-validation
+  status. Source-backed regular controls can remain physically unverified.
+- Classify positive IAE writable facts with complete, consistent family and
+  access-level evidence as regular; permit only bounded, matching family-array
+  inference. RXDX SDO presence/type and PCST readonly metadata do not establish
+  write permission.
+- Keep OBD-only `IsReadOnly=False` declarations experimental. Explicit
+  read-only, conflicting, unknown, and incomplete evidence remains blocked.
+- Require a complete, unambiguous write access level for regular and
+  experimental controls; experimental writes remain separately opt-in.
 
 ## 0.4.5 — release candidate
 

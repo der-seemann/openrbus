@@ -6,13 +6,18 @@ provides validated BLE segmentation, CAN-IP object access, a normalized public
 register registry, and an asynchronous high-level client.
 
 The project is alpha software. Read support has hardware evidence for the
-documented BLE/CAN-IP path. Regular writes are exposed for exact-family
-parameters declared writable by IAE/RXDX evidence, and SCB-10 CP733
-`346a:04` has additional reversible hardware validation. Other writable
-declarations require the separate experimental-write option. Active writes
-require explicit write enablement, an allowed access level, and a verified
-effective node role. Do not use writes on a production heating system unless
-you understand and can recover from the possible effects.
+documented BLE/CAN-IP path. Regular writes require positive IAE writable facts
+for the exact family and object, or a bounded family-array slot supported by
+consistent writable peers, together with complete access-level evidence.
+RXDX SDO presence or type does not establish write permission. SCB-10 CP733
+`346a:04` has additional reversible hardware validation, which is a separate
+status from its source classification. OBD-only `IsReadOnly=False` declarations
+remain experimental and require the separate opt-in; explicit read-only,
+conflicting, unknown, or incomplete evidence does not become writable through
+that option. Active writes also require explicit write enablement, an allowed
+access level, and a verified effective node role. Do not use writes on a
+production heating system unless you understand and can recover from the
+possible effects.
 
 ## Scope and boundaries
 
@@ -120,18 +125,23 @@ Level-2/3 reads and all writes are blocked unless independently enabled. See
 environment-variable configuration.
 
 SCB-10 `346a:04` has hardware-validated reversible write, read-back, and
-restore evidence. Exact IAE/RXDX writable declarations can also be used as
-regular writes for matching families. Other writable declarations require
-both write enablement and the experimental-write opt-in.
+restore evidence. Regular source-backed writes require positive IAE writable
+facts with complete, consistent access levels for the exact family and object,
+or a bounded family-array slot supported by matching peers. RXDX SDO presence
+or type does not establish write permission. OBD-only `IsReadOnly=False`
+declarations are experimental and require the separate experimental-write
+opt-in. Explicit read-only, conflicting, unknown, and incomplete evidence
+remains blocked; physical write-validation status is recorded separately.
 
 Writes have these independent gate groups:
 
 1. The client's access policy permits the register's declared level.
 2. Construct `OpenRBusClient` with `enable_writes=True`.
-3. Do not treat `allow_unsafe=True` as evidence or a bypass for an unverified
-   definition.
-4. For registers with device evidence, satisfy the declared access level. An
-   active write verifies the authoritative effective level from `4002:00`.
+3. `regular` source classifications need no experimental confirmation. An
+   `experimental` classification requires `allow_unsafe=True`; this does not
+   override read-only, conflicting, unknown, or incomplete evidence.
+4. Satisfy one complete, unambiguous required write level. An active write
+   verifies the authoritative effective level from `4002:00`.
 5. Pass a value satisfying the registry type, range, precision, family, and
    conflict checks.
 
