@@ -74,10 +74,13 @@ def _entry(
     )
     classification = definition.write_classification_for(address, family)
     evidenced_writable = (
-        classification is WriteClassification.REGULAR and write_requirement.is_known
+        classification is WriteClassification.REGULAR
+        and write_requirement.required_level is not None
     )
     experimental_writable = (
-        experimental_writes and classification is WriteClassification.EXPERIMENTAL
+        experimental_writes
+        and classification is WriteClassification.EXPERIMENTAL
+        and write_requirement.required_level is not None
     )
 
     def evidence(operation: AccessOperation) -> dict[str, object]:

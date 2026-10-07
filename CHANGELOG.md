@@ -3,6 +3,15 @@
 All notable changes to OpenRBus are documented here. Version numbers follow
 semantic versioning while the project remains in pre-1.0 development.
 
+## 0.4.6 — release candidate
+
+### Changed
+
+- Classify source-backed RW independently from physical write validation.
+- Require one complete, unambiguous write access level before the catalog
+  marks regular or experimental controls writable.
+- Keep OBD-only writable declarations behind the experimental opt-in.
+
 ## 0.4.5 — release candidate
 
 ### Fixed

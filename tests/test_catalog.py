@@ -1,8 +1,11 @@
+from types import SimpleNamespace
+
 from openrbus import RegisterCatalogEntry, catalog_for_node
+from openrbus.catalog import _entry
 from openrbus.discovery import CapabilityReference, DeviceIdentity, resolve_device_identity
 from openrbus.inventory import DeviceInventory, ObjectCapability, ObjectSupport
 from openrbus.protocol.canip import ObjectAddress
-from openrbus.registry import Registry
+from openrbus.registry import AccessLevel, Registry, WriteClassification, WriteSafety
 
 
 def test_catalog_public_exports() -> None:
@@ -257,3 +260,55 @@ def test_explicit_family_ro_sibling_blocks_only_unobserved_array_inference() -> 
     assert (
         conflicted.write_classification_for(ObjectAddress(0x346A, 4), "Scb-10").value == "regular"
     )
+
+
+def test_catalog_write_flag_requires_one_complete_unambiguous_level() -> None:
+    address = ObjectAddress(0x1000, 0)
+
+    def project(
+        levels: tuple[AccessLevel, ...],
+        *,
+        complete: bool,
+        classification: WriteClassification = WriteClassification.EXPERIMENTAL,
+    ) -> RegisterCatalogEntry:
+        requirement = SimpleNamespace(
+            is_known=complete and bool(levels),
+            is_ambiguous=len(levels) > 1,
+            required_level=levels[0] if complete and len(levels) == 1 else None,
+            levels=levels,
+            device_families=("Scb-10",) if levels else (),
+            complete=complete,
+        )
+        definition = SimpleNamespace(
+            access=SimpleNamespace(readable_declared=True, writable_declared=True),
+            access_requirement=lambda *_args, **_kwargs: requirement,
+            write_classification_for=lambda *_args: classification,
+            write_safety_for=lambda *_args: WriteSafety.UNVERIFIED,
+            evidence=SimpleNamespace(type_conflict=False, device_families=()),
+            names=SimpleNamespace(de="Synthetic", en="Synthetic"),
+            wire=SimpleNamespace(
+                type=SimpleNamespace(value="UINT16"),
+                storage=SimpleNamespace(value="UINT16"),
+                gain=None,
+                unit=None,
+            ),
+        )
+        return _entry(4, definition, "Scb-10", address, experimental_writes=True)
+
+    unknown_level = project((), complete=False)
+    single_level = project((AccessLevel.USER,), complete=True)
+    ambiguous_level = project((AccessLevel.USER, AccessLevel.PROFESSIONAL), complete=True)
+    ambiguous_regular = project(
+        (AccessLevel.USER, AccessLevel.PROFESSIONAL),
+        complete=True,
+        classification=WriteClassification.REGULAR,
+    )
+
+    assert unknown_level.write_declared is True
+    assert unknown_level.write_classification == "experimental"
+    assert unknown_level.writable is False
+    assert single_level.writable is True
+    assert ambiguous_level.write_classification == "experimental"
+    assert ambiguous_level.writable is False
+    assert ambiguous_regular.write_classification == "regular"
+    assert ambiguous_regular.writable is False
