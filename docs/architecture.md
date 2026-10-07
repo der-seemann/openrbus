@@ -44,6 +44,9 @@ The RUB codec is separate and is not inserted into this stack.
 `OpenRBusClient.read_many()` preserves ordinary object semantics. When the
 adapter implements `AsyncBulkObjectAccess`, `RawObjectClient` partitions reads
 into same-node GetList batches by object count and predicted response size.
+The response budget is capped at 400 CAN-IP bytes so a single burst stays
+below the 32-frame Thin-GATT event ring with room for lifecycle events; values
+whose declared maximum cannot fit are read individually.
 Other adapters use sequential `read_raw()` calls. Per-object aborts are returned
 alongside successful values; framing or correlation failures still fail the
 whole operation.

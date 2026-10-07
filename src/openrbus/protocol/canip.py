@@ -15,6 +15,9 @@ from openrbus.errors import CanOpenAbortError, ProtocolError
 
 MAX_GET_LIST_OBJECTS = 100
 MAX_GET_LIST_MESSAGE_SIZE = 1512
+# Keep a CAN-IP response to roughly twenty BLE notification fragments at most.
+# Thin-GATT's finite event queue has 32 slots and also carries lifecycle events.
+MAX_GET_LIST_RESPONSE_BYTES = 400
 
 
 class GenericFunction(IntEnum):

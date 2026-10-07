@@ -60,15 +60,28 @@ async def test_raw_object_read_and_private_write_correlate_responses() -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_many_splits_at_100_and_preserves_order() -> None:
+async def test_read_many_splits_at_response_budget_and_preserves_order() -> None:
     transport = FakeTransport()
     client = RawObjectClient(transport)
     items = tuple(ObjectRead(3, ObjectAddress(0x2000 + index), 1) for index in range(101))
     results = await client.read_many_raw(items)
     assert len(results) == 101
-    assert transport.batch_counts == [100, 1]
+    assert transport.batch_counts == [43, 43, 15]
     assert [result.address for result in results] == [item.address for item in items]
     assert results[1].raw == b"\x01"
+
+
+@pytest.mark.asyncio
+async def test_read_many_uses_conservative_response_budget_and_preserves_order() -> None:
+    transport = FakeTransport()
+    client = RawObjectClient(transport)
+    # Each 4-byte value costs 12 response bytes plus the 7-byte envelope.
+    # 32 objects fit in 391 bytes; a 33rd would exceed the 400-byte budget.
+    items = tuple(ObjectRead(3, ObjectAddress(0x2100 + index), 4) for index in range(65))
+    results = await client.read_many_raw(items)
+    assert len(results) == len(items)
+    assert transport.batch_counts == [32, 32, 1]
+    assert [result.address for result in results] == [item.address for item in items]
 
 
 @pytest.mark.asyncio
@@ -81,6 +94,6 @@ async def test_read_many_obeys_response_size_and_single_read_fallback() -> None:
         ObjectRead(1, ObjectAddress(0x3002), 1600),
     )
     results = await client.read_many_raw(items)
-    assert [result.raw for result in results] == [b"\x00", b"\x01", b"\x2a"]
-    assert transport.batch_counts == [1, 1]
+    assert [result.raw for result in results] == [b"\x2a", b"\x2a", b"\x2a"]
+    assert transport.batch_counts == []
     assert transport.functions[-1] is GenericFunction.READ

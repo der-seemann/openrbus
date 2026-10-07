@@ -311,6 +311,29 @@ def test_disconnect_invalidates_and_flow_control_is_terminal() -> None:
         session.ingest(frame("event", "CAPABILITY", 0, 0, payload={"state": CAPABILITY_MARKER}))
 
 
+def test_flow_control_reason_is_allowlisted_and_payload_free() -> None:
+    session = ThinGattSession(FakeChannel([]))
+    session.connected = True
+    session.epoch = 3
+    session.identity = ConnectionIdentity(1, 0)
+    with pytest.raises(ThinGattFlowControlError) as error:
+        session.ingest(
+            frame(
+                "event",
+                "FLOW_CONTROL",
+                3,
+                1,
+                payload={"state": "overflow", "reason": "queue_full", "payload": "secret"},
+            )
+        )
+    assert error.value.reason == "queue_full"
+    assert "secret" not in str(error.value)
+
+    invalid = ThinGattFlowControlError("private payload bytes")
+    assert invalid.reason is None
+    assert "private payload bytes" not in str(invalid)
+
+
 @pytest.mark.asyncio
 async def test_message_transport_roundtrip_reassembles_notifications() -> None:
     ident = {"gattc_if": 1, "conn_id": 0}

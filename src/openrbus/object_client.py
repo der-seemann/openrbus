@@ -9,6 +9,7 @@ from openrbus.errors import CanOpenAbortError, ProtocolError
 from openrbus.protocol.canip import (
     MAX_GET_LIST_MESSAGE_SIZE,
     MAX_GET_LIST_OBJECTS,
+    MAX_GET_LIST_RESPONSE_BYTES,
     CanIpMessage,
     ObjectAddress,
     build_batch_read,
@@ -62,7 +63,9 @@ class RawObjectClient:
         effective_timeout = self._timeout(timeout)
         results: list[RawReadResult] = []
         for batch in _partition_reads(items):
-            if _estimated_response_size(batch) > MAX_GET_LIST_MESSAGE_SIZE:
+            if _estimated_response_size(batch) > min(
+                MAX_GET_LIST_MESSAGE_SIZE, MAX_GET_LIST_RESPONSE_BYTES
+            ):
                 item = batch[0]
                 raw = await self.read_raw(item.node, item.address, timeout=effective_timeout)
                 results.append(RawReadResult(item.node, item.address, raw=raw))
@@ -141,7 +144,8 @@ def _partition_reads(items: Sequence[ObjectRead]) -> tuple[tuple[ObjectRead, ...
 
     for item in items:
         item_size = 8 + item.max_value_length
-        oversized = 7 + item_size > MAX_GET_LIST_MESSAGE_SIZE
+        response_budget = min(MAX_GET_LIST_MESSAGE_SIZE, MAX_GET_LIST_RESPONSE_BYTES)
+        oversized = 7 + item_size > response_budget
         if oversized:
             if current:
                 batches.append(tuple(current))
@@ -155,7 +159,7 @@ def _partition_reads(items: Sequence[ObjectRead]) -> tuple[tuple[ObjectRead, ...
             and (
                 item.node != current[0].node
                 or len(current) == MAX_GET_LIST_OBJECTS
-                or current_size + item_size > MAX_GET_LIST_MESSAGE_SIZE
+                or current_size + item_size > response_budget
             )
         )
         if must_split:

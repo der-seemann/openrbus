@@ -36,6 +36,19 @@ class ThinGattCapabilityError(ThinGattError):
 class ThinGattFlowControlError(ThinGattError):
     """The peer reported a terminal event-stream overflow or desync."""
 
+    _ALLOWED_REASONS = frozenset(
+        {"queue_full", "frame_too_large", "handle_registry_full", "payload_too_large"}
+    )
+
+    def __init__(self, reason: object = None) -> None:
+        self.reason = (
+            reason if isinstance(reason, str) and reason in self._ALLOWED_REASONS else None
+        )
+        message = "Thin-GATT event stream is desynchronized"
+        if self.reason is not None:
+            message = f"{message}: {self.reason}"
+        super().__init__(message)
+
 
 class ThinGattSessionStateError(ThinGattError):
     """An operation is invalid for the current session state."""
@@ -241,7 +254,9 @@ class ThinGattSession:
             self.capability = self._capability_seen = True
             return frame
         if op == "FLOW_CONTROL":
-            self.stream_error = ThinGattFlowControlError("Thin-GATT event stream is desynchronized")
+            payload = frame.get("payload")
+            reason = payload.get("reason") if isinstance(payload, Mapping) else None
+            self.stream_error = ThinGattFlowControlError(reason)
             raise self.stream_error
         frame_request_id = frame.get("request_id")
         if type(frame_request_id) is int and frame_request_id in self._retired_operations:
