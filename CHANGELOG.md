@@ -3,7 +3,7 @@
 All notable changes to OpenRBus are documented here. Version numbers follow
 semantic versioning while the project remains in pre-1.0 development.
 
-## 0.4.7 — release candidate
+## 0.4.7 — 2026-10-09
 
 ### Fixed
 
