@@ -85,7 +85,10 @@ epoch and pending-ID checks make those callbacks harmless.
 There is one serialized ATT operation per connection and a fixed 16-frame
 outgoing ring. Python sends the next operation only after a terminal response;
 notification consumers must drain promptly. Overflow emits `FLOW_CONTROL` and
-the Python side treats the connection as unusable. The ESP boundary uses a
+the Python side treats the connection as unusable. Its `reason` is retained
+only for the fixed codes `queue_full`, `frame_too_large`,
+`handle_registry_full`, and `payload_too_large`; arbitrary peer text is
+discarded. The ESP boundary uses a
 10 s deadline for every asynchronous ATT write, descriptor, subscription, or
 notification transaction. Suggested end-to-end deadlines are 20 s connect,
 10 s pair/encrypt, 5 s discovery/handle lookup, and caller-selected bounded

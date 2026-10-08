@@ -3,6 +3,19 @@
 All notable changes to OpenRBus are documented here. Version numbers follow
 semantic versioning while the project remains in pre-1.0 development.
 
+## 0.4.7 — 2026-10-09
+
+### Fixed
+
+- Bound Thin-GATT `GetList` responses to the declared CAN-IP wire-size limit.
+- Preserve and report bounded `FLOW_CONTROL` transport reasons for diagnostics.
+
+### Compatibility and limits
+
+- The public protocol API remains compatible; bounded responses may require
+  callers to request large lists in smaller batches.
+- This release does not establish physical write safety.
+
 ## 0.4.6 — 2026-10-07
 
 ### Changed
